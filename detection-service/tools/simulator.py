@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import ssl
 import sys
 import time
 from pathlib import Path
@@ -37,9 +38,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--port", type=int, default=1883)
     p.add_argument("--username")
     p.add_argument("--password")
+    p.add_argument("--tls-ca", help="certificat de l'autorité : active TLS (MQTTS, port 8883)")
     p.add_argument("--device", default="esp01")
-    p.add_argument("--sensor-topic", default="maison/{device_id}/capteurs")
-    p.add_argument("--camera-topic", default="maison/{device_id}/camera")
+    p.add_argument("--sensor-topic", default="sentinelx/{device_id}/telemetry")
+    p.add_argument("--camera-topic", default="sentinelx/{device_id}/camera")
     p.add_argument("--rate", type=float, default=5.0, help="messages capteurs par seconde")
     p.add_argument("--camera-rate", type=float, default=1.0, help="messages caméra par seconde (0 = aucun)")
     p.add_argument("--sequence", default="normal:150,presence:30,fuite_gaz:45,normal:60,feu:120,capteur_muet:20")
@@ -71,7 +73,9 @@ async def main() -> None:
     period = 1.0 / args.rate
     cam_period = 1.0 / args.camera_rate if args.camera_rate > 0 else None
 
-    async with aiomqtt.Client(args.host, args.port, username=args.username, password=args.password) as client:
+    tls = aiomqtt.TLSParameters(ca_certs=args.tls_ca, cert_reqs=ssl.CERT_REQUIRED) if args.tls_ca else None
+    async with aiomqtt.Client(args.host, args.port, username=args.username, password=args.password or None,
+                              tls_params=tls) as client:
         start = time.time()
         while True:
             for scenario, duration in sequence:

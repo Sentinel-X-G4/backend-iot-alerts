@@ -1,5 +1,5 @@
 {
-  "description": "Topic `maison/{device_id}/capteurs` (~5 msg/s).",
+  "description": "Topic `sentinelx/{device_id}/telemetry` (~5 msg/s).",
   "properties": {
     "ts": {
       "anyOf": [

@@ -6,8 +6,7 @@ ARG INSTALL_ORANGE=false
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    ALEMBIC_CONFIG=/app/alembic.ini
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
@@ -16,8 +15,6 @@ COPY src ./src
 RUN if [ "$INSTALL_ORANGE" = "true" ]; then EXTRAS="sklearn,orange"; else EXTRAS="sklearn"; fi \
     && pip install ".[${EXTRAS}]"
 
-COPY alembic.ini ./
-COPY migrations ./migrations
 COPY tools ./tools
 
 RUN useradd --create-home --uid 1000 app && mkdir -p /models && chown app /models

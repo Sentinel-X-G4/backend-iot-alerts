@@ -1,12 +1,13 @@
-# Pile de développement : service de détection + Mosquitto + PostgreSQL/TimescaleDB + faux backend.
+# Pile isolée de développement : service de détection + Mosquitto (anonyme, 1883) + faux backend.
+# Sans base : rien n'est persisté. Pile complète (MQTTS, base sentinel-db) : dépôt Sentinel-X-G4/main.
 #
 #   cp .env.example .env
 #   docker compose up --build                      # service, broker, base, faux backend
 #   docker compose --profile sim up simulator      # injecte des données simulées
 #
 # Intégration future :
-# - Base externe (ex. celle du backend) : retirer « local-db » de COMPOSE_PROFILES et pointer
-#   DATABASE_URL dessus. Les tables vont dans le schéma DB_SCHEMA (défaut « detection »).
+# - Base : définir DATABASE_URL vers une base créée avec sentinel-x-g4/infra/postgres/init
+#   (le service ne crée aucune table).
 # - Les autres piles (backend, conteneur qui publie en MQTT) rejoignent le réseau nommé
 #   « iot-net » avec `networks: { iot: { external: true, name: iot-net } }`.
 
@@ -16,8 +17,6 @@ networks:
   iot:
     name: ${IOT_NETWORK:-iot-net}
 
-volumes:
-  pgdata:
 
 services:
   mosquitto:
@@ -27,25 +26,6 @@ services:
     ports:
       - "${MQTT_PUBLISHED_PORT:-1883}:1883"
     networks: [iot]
-    restart: unless-stopped
-
-  postgres:
-    image: timescale/timescaledb:latest-pg16
-    profiles: ["local-db"]
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-iot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot}
-      POSTGRES_DB: ${POSTGRES_DB:-iot}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
-    networks: [iot]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
     restart: unless-stopped
 
   fake-backend:
@@ -68,7 +48,7 @@ services:
         required: false
     environment:
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://iot:iot@postgres:5432/iot}
+      DATABASE_URL: ${DATABASE_URL:-}
       BACKEND_URL: ${BACKEND_URL:-http://fake-backend:8080}
     volumes:
       - ./models:/models:ro
@@ -78,9 +58,6 @@ services:
     depends_on:
       mosquitto:
         condition: service_started
-      postgres:
-        condition: service_healthy
-        required: false  # absent si la base est externe
     restart: unless-stopped
 
   simulator:

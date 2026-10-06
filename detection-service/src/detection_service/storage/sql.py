@@ -43,7 +43,7 @@ class SqlStorage(Storage):
             await self._engine.dispose()
 
     async def create_all(self) -> None:
-        """Création directe des tables (tests / SQLite). En production : Alembic."""
+        """Création directe des tables (tests / SQLite uniquement). PostgreSQL : schéma de l'infra."""
         async with self.engine.begin() as conn:
             await conn.run_sync(t.metadata.create_all)
 

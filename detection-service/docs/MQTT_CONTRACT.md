@@ -8,28 +8,23 @@ JSON Schema : [`schemas/sensor_message.schema.json`](schemas/sensor_message.sche
 
 ## Connexion
 
-| Paramètre | Valeur par défaut | Variable du service |
-|---|---|---|
-| Broker | `mosquitto:1883` (réseau Docker `iot-net`) | `MQTT_HOST`, `MQTT_PORT` |
-| Authentification | aucune en dev | `MQTT_USERNAME`, `MQTT_PASSWORD` |
-| TLS | désactivé | `MQTT_TLS`, `MQTT_TLS_CA_CERTS` |
-| QoS | 0 | `MQTT_QOS` |
+| Paramètre | Pile complète (dépôt `main`) | Pile isolée (ce dossier) | Variable du service |
+|---|---|---|---|
+| Broker | `mqtt.sentinel.lan:8883` (réseau `sentinel-back`) | `mosquitto:1883` (réseau `iot-net`) | `MQTT_HOST`, `MQTT_PORT` |
+| TLS | obligatoire (CA `ca.crt`) | désactivé | `MQTT_TLS`, `MQTT_TLS_CA_CERTS` |
+| Authentification | compte `detection` (+ ACL) | aucune | `MQTT_USERNAME`, `MQTT_PASSWORD` |
+| QoS | 0 en entrée, 1 pour les résultats | idem | `MQTT_QOS`, `MQTT_RESULT_QOS` |
 
-Le producteur peut rejoindre le réseau du service depuis son propre `docker-compose.yml` :
-
-```yaml
-networks:
-  iot:
-    external: true
-    name: iot-net
-```
+Comptes et droits de la pile complète : `sentinel-x-g4/infra/mosquitto/config/acl`
+(`sentinel_iot` = ESP, `vision` = caméra, `detection` = ce service, `iot-backend` = backend-api).
 
 ## Topics
 
 | Topic | Fréquence | Contenu |
 |---|---|---|
-| `maison/{device_id}/capteurs` | ~5 msg/s (toutes les 200 ms) | mesures de l'ESP8266 |
-| `maison/{device_id}/camera` | libre (1 msg/s conseillé) | détection de personne |
+| `sentinelx/{device_id}/telemetry` | ~5 msg/s (toutes les 200 ms) | mesures de l'ESP8266 |
+| `sentinelx/{device_id}/camera` | libre (1 msg/s conseillé) | détection de personne |
+| `sentinelx/{device_id}/detection` | changement d'état + heartbeat 10 s | **sortie** : résultats du service (QoS 1) |
 
 - `{device_id}` : identifiant de l'appareil (sans `/`), ex. `esp01`. La caméra d'une pièce
   doit publier avec le **même `device_id`** que l'ESP de cette pièce : les deux flux sont
@@ -38,7 +33,7 @@ networks:
   contenir exactement un `{device_id}`.
 - Charge utile : **JSON UTF-8**, un objet par message. Les champs inconnus sont ignorés.
 
-## `maison/{device_id}/capteurs`
+## `sentinelx/{device_id}/telemetry`
 
 ```json
 {"ts": 1728136800123, "temp": 22.4, "hum": 45.1, "pir": 1, "gas_raw": 312, "gas_do": 0, "warmup": false}
@@ -50,7 +45,7 @@ networks:
 | `temp` | nombre ou `null` | non | °C, −40 → 80. `null` si le DHT22 n'a pas été lu (au plus une lecture toutes les 2 s) ou si la lecture a échoué. `NaN` et les valeurs hors plage sont traités comme `null`. |
 | `hum` | nombre ou `null` | non | %HR, 0 → 100. Mêmes règles que `temp`. |
 | `pir` | `0`/`1` (ou booléen) | **oui** | Sortie du HW-416, sans transformation. |
-| `gas_raw` | entier | **oui** | Sortie AO du MQ-2 : valeur ADC brute **0 → 1023**, sans conversion. |
+| `gas_raw` (ou `gas`) | entier | **oui** | Sortie AO du MQ-2 : valeur ADC brute **0 → 1023**, sans conversion. |
 | `gas_do` | `0`/`1` | non | Sortie DO **brute** du MQ-2 : `0` = seuil dépassé (actif bas), `1` = normal. Omettre le champ si DO n'est pas câblé. |
 | `warmup` | booléen | non (défaut `false`) | `true` tant que l'appareil sait que ses capteurs chauffent (ex. 60 premières secondes après boot). |
 
@@ -67,7 +62,7 @@ networks:
 - Ne pas répéter la dernière température quand le DHT22 n'est pas lu : envoyer `null`.
 - Plus de message pendant `STALE_AFTER_S` (10 s) : l'appareil passe en statut `stale`.
 
-## `maison/{device_id}/camera`
+## `sentinelx/{device_id}/camera`
 
 ```json
 {"ts": 1728136800150, "person": true}
@@ -83,14 +78,20 @@ la caméra n'a rien publié dans la fenêtre, sa dernière valeur reste valable 
 `CAMERA_HOLD_S` (5 s). Si la caméra ne publie **qu'aux changements**, augmenter
 `CAMERA_HOLD_S` en conséquence. Le mieux reste de publier périodiquement (≥ 1 msg/s).
 
+## `sentinelx/{device_id}/detection` (sortie)
+
+Publié par le service, lu par `backend-api`. Le corps est exactement le payload décrit dans
+[`BACKEND_CONTRACT.md`](BACKEND_CONTRACT.md) (statut, alertes, métriques). Avec
+`MQTT_RESULT_TOPIC` vide, ce payload part en HTTP vers `BACKEND_URL` à la place.
+
 ## Tester son producteur
 
 ```bash
 # Écouter ce que reçoit le broker
-docker compose exec mosquitto mosquitto_sub -t 'maison/#' -v
+docker compose exec mosquitto mosquitto_sub -t 'sentinelx/#' -v
 
 # Publier un message à la main
-docker compose exec mosquitto mosquitto_pub -t maison/esp01/capteurs \
+docker compose exec mosquitto mosquitto_pub -t sentinelx/esp01/telemetry \
   -m '{"temp": null, "hum": null, "pir": 0, "gas_raw": 180, "gas_do": 1}'
 
 # Vérifier que le service l'accepte (compteurs received / invalid)

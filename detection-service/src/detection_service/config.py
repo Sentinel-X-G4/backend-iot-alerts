@@ -47,9 +47,12 @@ class Settings(BaseSettings):
     mqtt_tls_ca_certs: str | None = None
     mqtt_tls_insecure: bool = False
     mqtt_client_id: str = "detection-service"
-    mqtt_sensor_topic: str = "maison/{device_id}/capteurs"
-    mqtt_camera_topic: str = "maison/{device_id}/camera"
+    mqtt_sensor_topic: str = "sentinelx/{device_id}/telemetry"
+    mqtt_camera_topic: str = "sentinelx/{device_id}/camera"
     mqtt_qos: int = Field(0, ge=0, le=2)
+    mqtt_result_topic: str | None = "sentinelx/{device_id}/detection"
+    """Topic des résultats ; vide = envoi HTTP au backend (BACKEND_URL) à la place."""
+    mqtt_result_qos: int = Field(1, ge=0, le=2)
     mqtt_reconnect_min_s: float = 1.0
     mqtt_reconnect_max_s: float = 30.0
 
@@ -110,7 +113,6 @@ class Settings(BaseSettings):
     db_batch_size: int = Field(200, ge=1)
     db_flush_interval_s: float = Field(1.0, gt=0)
     db_max_buffered_rows: int = Field(50_000, ge=1)
-    run_migrations: bool = True
     store_all_feature_windows: bool = True
 
     # --- API -----------------------------------------------------------------
@@ -123,7 +125,7 @@ class Settings(BaseSettings):
     log_json: bool = False
 
     @field_validator(
-        "mqtt_username", "mqtt_password", "mqtt_tls_ca_certs", "model_path", "backend_url", "backend_token",
+        "mqtt_username", "mqtt_password", "mqtt_tls_ca_certs", "mqtt_result_topic", "model_path", "backend_url", "backend_token",
         "database_url", "admin_token", mode="before",
     )
     @classmethod

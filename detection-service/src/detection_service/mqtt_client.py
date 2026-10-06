@@ -25,10 +25,11 @@ log = logging.getLogger(__name__)
 
 SensorHandler = Callable[[SensorReading], None]
 CameraHandler = Callable[[CameraEvent], None]
+ClientHandler = Callable[[aiomqtt.Client | None], None]
 
 
 class TopicPattern:
-    """Motif du type `maison/{device_id}/capteurs` → filtre MQTT + extraction du device_id."""
+    """Motif du type `sentinelx/{device_id}/telemetry` → filtre MQTT + extraction du device_id."""
 
     def __init__(self, pattern: str) -> None:
         if pattern.count("{device_id}") != 1:
@@ -41,6 +42,9 @@ class TopicPattern:
     def device_id(self, topic: str) -> str | None:
         m = self._regex.match(topic)
         return m.group(1) if m else None
+
+    def topic(self, device_id: str) -> str:
+        return self.pattern.replace("{device_id}", device_id)
 
 
 @dataclass
@@ -103,8 +107,12 @@ def _tls_params(settings: Settings) -> aiomqtt.TLSParameters | None:
     )
 
 
-async def run_mqtt(settings: Settings, dispatcher: MessageDispatcher) -> None:
-    """Boucle infinie : connexion, abonnement, réception ; reconnexion sur erreur."""
+async def run_mqtt(settings: Settings, dispatcher: MessageDispatcher, on_client: ClientHandler | None = None) -> None:
+    """Boucle infinie : connexion, abonnement, réception ; reconnexion sur erreur.
+
+    `on_client` reçoit le client à chaque connexion et None à chaque déconnexion
+    (utilisé pour publier les résultats sur la même connexion).
+    """
     delay = settings.mqtt_reconnect_min_s
     stats = dispatcher.stats
     while True:
@@ -130,9 +138,15 @@ async def run_mqtt(settings: Settings, dispatcher: MessageDispatcher) -> None:
                     extra={"host": settings.mqtt_host, "port": settings.mqtt_port,
                            "topics": [dispatcher.sensor_topic.filter, dispatcher.camera_topic.filter]},
                 )
-                async for message in client.messages:
-                    payload = message.payload if isinstance(message.payload, bytes) else str(message.payload).encode()
-                    dispatcher.dispatch(str(message.topic), payload)
+                if on_client is not None:
+                    on_client(client)
+                try:
+                    async for message in client.messages:
+                        payload = message.payload if isinstance(message.payload, bytes) else str(message.payload).encode()
+                        dispatcher.dispatch(str(message.topic), payload)
+                finally:
+                    if on_client is not None:
+                        on_client(None)
         except aiomqtt.MqttError as exc:
             stats.connected = False
             stats.last_error = str(exc)

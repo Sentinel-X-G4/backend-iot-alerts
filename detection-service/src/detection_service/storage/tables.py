@@ -1,6 +1,7 @@
 """Tables SQLAlchemy Core (sans schéma : il est appliqué via schema_translate_map).
 
-Toute modification ici doit s'accompagner d'une migration Alembic (migrations/versions).
+Le schéma PostgreSQL est défini à un seul endroit : sentinel-x-g4/infra/postgres/init/02-detection.sql.
+Toute modification ici doit y être reportée (le service ne crée aucune table).
 """
 
 from __future__ import annotations

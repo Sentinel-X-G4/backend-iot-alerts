@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 AlertType = Literal["feu", "fuite_gaz", "presence"]
 AlertStatus = Literal["feu", "fuite_gaz", "presence", "aucune"]
@@ -31,7 +31,7 @@ def _nan_to_none(v: object) -> object:
 # Messages MQTT entrants
 # --------------------------------------------------------------------------- #
 class SensorMessage(BaseModel):
-    """Topic `maison/{device_id}/capteurs` (~5 msg/s)."""
+    """Topic `sentinelx/{device_id}/telemetry` (~5 msg/s)."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -39,7 +39,8 @@ class SensorMessage(BaseModel):
     temp: float | None = Field(None, description="Température °C (DHT22), null si non lue")
     hum: float | None = Field(None, description="Humidité %HR (DHT22), null si non lue")
     pir: bool = Field(..., description="Mouvement PIR (0/1)")
-    gas_raw: int = Field(..., ge=0, le=1023, description="MQ-2 sortie AO, ADC 10 bits")
+    gas_raw: int = Field(..., ge=0, le=1023, validation_alias=AliasChoices("gas_raw", "gas"),
+                         description="MQ-2 sortie AO, ADC 10 bits (`gas` accepté)")
     gas_do: int | None = Field(
         None, description="MQ-2 sortie DO brute : 0 = seuil dépassé (actif bas), 1 = normal. Optionnel."
     )
@@ -75,7 +76,7 @@ class SensorMessage(BaseModel):
 
 
 class CameraMessage(BaseModel):
-    """Topic `maison/{device_id}/camera`."""
+    """Topic `sentinelx/{device_id}/camera`."""
 
     model_config = ConfigDict(extra="ignore")
 

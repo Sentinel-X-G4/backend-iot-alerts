@@ -5,15 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import signal
 import time
-from pathlib import Path
 
 from .backend_client import BackendSender
 from .config import Settings
 from .engine import DetectionEngine
 from .mqtt_client import MessageDispatcher, run_mqtt
+from .mqtt_publisher import MqttResultPublisher
 from .predictors import ModelLoadError, Predictor, create_predictor
 from .storage import BatchWriter, MemoryStorage, create_storage
 
@@ -30,7 +29,7 @@ class Service:
         self.writer = BatchWriter(
             self.storage, settings.db_batch_size, settings.db_flush_interval_s, settings.db_max_buffered_rows
         )
-        self.sender = BackendSender(settings)
+        self.sender = MqttResultPublisher(settings) if settings.mqtt_result_topic else BackendSender(settings)
         # Échoue au démarrage avec un message clair si le modèle est incompatible.
         self.engine = DetectionEngine(settings, predictor or create_predictor(settings), self.writer,
                                       self.sender.enqueue)
@@ -72,12 +71,13 @@ class Service:
             await asyncio.sleep(delay)
 
     async def _db_bootstrap(self) -> None:
-        """Migrations + connexion, avec reprises : une base absente ne bloque pas l'inférence."""
+        """Connexion avec reprises : une base absente ne bloque pas l'inférence.
+
+        Le schéma n'est pas créé ici : il est défini dans sentinel-x-g4/infra/postgres/init.
+        """
         delay = 1.0
         while True:
             try:
-                if self.settings.run_migrations:
-                    await asyncio.to_thread(run_migrations)
                 await self.storage.connect()
                 await self.storage.ping()
                 self.db_ready = True
@@ -118,8 +118,9 @@ class Service:
             db_task = None
             log.warning("DATABASE_URL non défini : rien n'est persisté")
 
+        on_client = self.sender.bind if isinstance(self.sender, MqttResultPublisher) else None
+        mqtt_task = asyncio.create_task(run_mqtt(self.settings, self.dispatcher, on_client), name="mqtt")
         tasks = [
-            asyncio.create_task(run_mqtt(self.settings, self.dispatcher), name="mqtt"),
             asyncio.create_task(self._ticker(), name="ticker"),
             asyncio.create_task(self._api(), name="api"),
         ]
@@ -134,7 +135,9 @@ class Service:
         sender_task.cancel()
         writer_task.cancel()
         await asyncio.gather(sender_task, writer_task, return_exceptions=True)
-        await self.sender.drain()
+        await self.sender.drain()  # avant de couper MQTT : les résultats peuvent y partir
+        mqtt_task.cancel()
+        await asyncio.gather(mqtt_task, return_exceptions=True)
         if self.db_ready:
             await self.writer.drain()
         await self.storage.close()
@@ -149,12 +152,3 @@ class Service:
         with contextlib.suppress(ModelLoadError):
             self.reload_model()
 
-
-def run_migrations() -> None:
-    from alembic import command
-    from alembic.config import Config
-
-    ini = Path(os.getenv("ALEMBIC_CONFIG", Path.cwd() / "alembic.ini"))
-    if not ini.is_file():
-        ini = Path(__file__).resolve().parents[2] / "alembic.ini"
-    command.upgrade(Config(str(ini)), "head")

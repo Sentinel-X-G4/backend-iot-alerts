@@ -10,7 +10,7 @@ d'entraînement.
 ## Architecture
 
 ```
-            MQTT (maison/{device_id}/capteurs, /camera)
+            MQTT (sentinelx/{device_id}/telemetry, /camera)
                               │
                 ┌─────────────▼─────────────┐
                 │ mqtt_client  validation   │── message invalide → log + ignoré
@@ -78,25 +78,22 @@ Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans `.env`.
 
 ### Intégration avec les autres conteneurs
 
-- **Base PostgreSQL** : elle tourne dans son propre conteneur (`postgres`, profil
-  `local-db`). Pour utiliser une autre base, par exemple celle du backend, retirer
-  `local-db` de `COMPOSE_PROFILES` et définir `DATABASE_URL`. Les tables sont créées par
-  Alembic au démarrage, dans le schéma dédié `DB_SCHEMA` (`detection`), sans toucher aux
-  tables du backend. Si la base est injoignable, le service continue de détecter : les
-  écritures restent en mémoire (bornée) et sont réessayées.
+- **Base PostgreSQL** : c'est la base commune `sentinel-db` de la pile complète (dépôt
+  `main`). Son schéma, y compris le schéma `detection` de ce service, est défini à un seul
+  endroit : `sentinel-x-g4/infra/postgres/init/`. Le service ne crée aucune table. Sans
+  `DATABASE_URL` (pile isolée de ce dossier), rien n'est persisté. Si la base est
+  injoignable, le service continue de détecter : les écritures restent en mémoire (bornée)
+  et sont réessayées.
 - **Réseau** : la pile crée le réseau Docker `iot-net`. Le backend et le conteneur
   producteur MQTT le rejoignent avec `networks: { iot: { external: true, name: iot-net } }`.
-- **TimescaleDB** : `TIMESCALEDB=true` crée des hypertables pour `sensor_readings`,
-  `camera_events` et `feature_windows`. Mettre `false` sur un PostgreSQL standard.
 
 ## Développement local (sans Docker pour le service)
 
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"            # + ".[orange]" pour charger les .pkcls
-docker compose up -d mosquitto postgres fake-backend
-export MQTT_HOST=localhost DATABASE_URL=postgresql+asyncpg://iot:iot@localhost:5432/iot \
-       BACKEND_URL=http://localhost:8080
+docker compose up -d mosquitto
+export MQTT_HOST=localhost
 detection-service
 python tools/simulator.py --sequence normal:150,fuite_gaz:45,normal:60
 ```
@@ -121,7 +118,7 @@ principales :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TLS` | `localhost`, `1883` | Broker. |
-| `MQTT_SENSOR_TOPIC`, `MQTT_CAMERA_TOPIC` | `maison/{device_id}/capteurs`, `…/camera` | Motifs de topics. |
+| `MQTT_SENSOR_TOPIC`, `MQTT_CAMERA_TOPIC` | `sentinelx/{device_id}/telemetry`, `…/camera` | Motifs de topics. |
 | `INFERENCE_INTERVAL_S` | `0.5` | Période d'inférence (horloge). |
 | `SHORT_WINDOW_S`, `LONG_WINDOW_S` | `2`, `60` | Fenêtres courte et longue. |
 | `WARMUP_SECONDS` | `120` | Préchauffage sans prédiction. |
@@ -133,7 +130,7 @@ principales :
 | `SAFETY_GAS_CRITICAL`, `SAFETY_GAS_DO_TICKS` | `800`, `4` | Filet de sécurité gaz. |
 | `BACKEND_URL`, `BACKEND_ALERT_ROUTE`, `BACKEND_TOKEN` | —, `/api/alerts` | Envoi des alertes. |
 | `HEARTBEAT_INTERVAL_S` | `10` | Heartbeat vers le backend. |
-| `DATABASE_URL`, `DB_SCHEMA`, `TIMESCALEDB` | —, `detection`, `false` | Stockage. |
+| `DATABASE_URL`, `DB_SCHEMA` | —, `detection` | Stockage (schéma créé par l'infra). |
 
 ### Choix par défaut retenus
 
@@ -285,9 +282,10 @@ Options : `--device`, `--rate`, `--camera-rate`, `--loop`, `--device-warmup`, `-
 
 Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_windows`
 (une colonne par feature, plus `session_id` et `label`), `predictions` (alertes en JSONB,
-écrites à chaque envoi au backend), `recording_sessions`. Migrations dans `migrations/`
-(`alembic upgrade head`, lancé automatiquement si `RUN_MIGRATIONS=true`). Toute
-modification de `storage/tables.py` doit s'accompagner d'une migration.
+écrites à chaque envoi au backend), `recording_sessions`. Elles sont créées par
+`sentinel-x-g4/infra/postgres/init/02-detection.sql` (hypertables TimescaleDB pour
+`sensor_readings`, `camera_events` et `feature_windows`). Toute modification de
+`storage/tables.py` doit y être reportée.
 
 Volume indicatif par appareil : environ 430 000 mesures brutes et 170 000 fenêtres par
 jour. Avec TimescaleDB, prévoir une politique de rétention, par exemple

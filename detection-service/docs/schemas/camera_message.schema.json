@@ -1,5 +1,5 @@
 {
-  "description": "Topic `maison/{device_id}/camera`.",
+  "description": "Topic `sentinelx/{device_id}/camera`.",
   "properties": {
     "ts": {
       "anyOf": [

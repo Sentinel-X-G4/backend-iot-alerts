@@ -1,4 +1,8 @@
-# Contrat de sortie : route d'alertes du backend
+# Contrat de sortie : résultats envoyés au backend
+
+> **Transport par défaut : MQTT.** Le payload ci-dessous est publié sur
+> `sentinelx/{device_id}/detection` (QoS 1, `MQTT_RESULT_TOPIC`). La route HTTP décrite
+> ici n'est utilisée que si `MQTT_RESULT_TOPIC` est vide.
 
 > **À implémenter côté backend.** La route n'existe pas encore. Une implémentation de
 > référence exécutable se trouve dans [`../fake_backend/app.py`](../fake_backend/app.py).
