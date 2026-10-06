@@ -56,43 +56,43 @@ d'entraînement.
 - **Sortie backend** (route à implémenter) : [`docs/BACKEND_CONTRACT.md`](docs/BACKEND_CONTRACT.md)
 - JSON Schema générés depuis le code : [`docs/schemas/`](docs/schemas/) (`python tools/export_schemas.py`)
 
-## Démarrage rapide (Docker)
+## Démarrage (Docker)
+
+Le service n'a pas de compose propre : il est lancé par le **seul** `docker-compose.yml` du
+dépôt [`main`](https://github.com/Sentinel-X-G4/main) (conteneur `sentinel-detection`), avec
+Mosquitto en MQTTS et la base `backend_db`.
 
 ```bash
-cp .env.example .env
-docker compose up --build -d          # service + Mosquitto + TimescaleDB + faux backend
-docker compose logs -f detection-service fake-backend
-
-# Dans un autre terminal : données simulées
-docker compose --profile sim run --rm simulator
+# depuis main/
+make up
+make sim                     # données simulées
 ```
 
-| URL | Contenu |
+| URL (port `DETECTION_API_PORT` du `.env` de main) | Contenu |
 |---|---|
 | http://localhost:8000/health | santé (MQTT, base, modèle, appareils) |
 | http://localhost:8000/status/esp01 | dernier résultat d'un appareil |
 | http://localhost:8000/docs | documentation interactive de l'API |
-| http://localhost:8080/api/devices | dernier état reçu par le faux backend |
 
-Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans `.env`.
+Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans le `.env` de main.
 
 ### Intégration avec les autres conteneurs
 
-- **Base PostgreSQL** : c'est la base commune `sentinel-db` de la pile complète (dépôt
-  `main`). Son schéma, y compris le schéma `detection` de ce service, est défini à un seul
-  endroit : `sentinel-x-g4/infra/postgres/init/`. Le service ne crée aucune table. Sans
-  `DATABASE_URL` (pile isolée de ce dossier), rien n'est persisté. Si la base est
-  injoignable, le service continue de détecter : les écritures restent en mémoire (bornée)
-  et sont réessayées.
-- **Réseau** : la pile crée le réseau Docker `iot-net`. Le backend et le conteneur
-  producteur MQTT le rejoignent avec `networks: { iot: { external: true, name: iot-net } }`.
+- **Base PostgreSQL** : c'est la base unique du projet, dépôt `backend_db`. Son schéma, y
+  compris le schéma `detection` de ce service, est défini à un seul endroit :
+  `backend_db/db/init/`. Le service ne crée aucune table. Sans `DATABASE_URL`, rien n'est
+  persisté. Si la base est injoignable, le service continue de détecter : les écritures
+  restent en mémoire (bornée) et sont réessayées.
+- **Alertes et états** : le service est le seul abonné MQTT ; backend-api lit ses résultats
+  en base (`alerts`, `detection.predictions`).
 
 ## Développement local (sans Docker pour le service)
 
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"            # + ".[orange]" pour charger les .pkcls
-docker compose up -d mosquitto
+# un broker MQTT local, par exemple : docker run -d -p 1883:1883 eclipse-mosquitto:2 \
+#   mosquitto -c /mosquitto-no-auth.conf
 export MQTT_HOST=localhost
 detection-service
 python tools/simulator.py --sequence normal:150,fuite_gaz:45,normal:60
@@ -137,11 +137,10 @@ principales :
 Ces choix ont été validés avant le développement ou pris par défaut. Ils sont tous
 configurables :
 
-- **Base** : PostgreSQL/TimescaleDB dans un conteneur séparé, joint par `DATABASE_URL`.
-  Les tables sont dans un schéma dédié pour pouvoir partager plus tard la base du backend.
-- **Backend** : pas encore développé. Le contrat est dans `docs/BACKEND_CONTRACT.md` et un
-  faux backend de référence est fourni. Route par défaut `POST /api/alerts`, jeton Bearer
-  optionnel.
+- **Base** : PostgreSQL/TimescaleDB (dépôt `backend_db`), jointe par `DATABASE_URL`. Les
+  tables du service sont dans un schéma dédié (`detection`), à côté des tables communes.
+- **Backend** : backend-api lit la base. L'envoi HTTP (`docs/BACKEND_CONTRACT.md`, route
+  `POST /api/alerts`) n'est utilisé que si `MQTT_RESULT_TOPIC` est vide.
 - **MQTT** : le format d'entrée est imposé par ce service (`docs/MQTT_CONTRACT.md`). Le
   conteneur qui relaie l'ESP et la caméra s'y conforme.
 - **Modèle** : mode **multi-label** par défaut. Tant qu'aucun modèle n'est entraîné, le
@@ -256,7 +255,7 @@ ticks) → `ok` (prédiction). Ensuite `no_data` si la fenêtre courte contient 
    refuse les modèles avec d'autres prétraitements (normalisation…). Dans ce cas, utiliser
    `PREDICTOR=orange`.
 
-5. **Recharger sans redémarrer** : `docker compose kill -s HUP detection-service`, ou
+5. **Recharger sans redémarrer** : `docker compose kill -s HUP detection-service` (depuis main/), ou
    `curl -X POST localhost:8000/admin/reload-model -H "Authorization: Bearer $ADMIN_TOKEN"`.
    Si le nouveau modèle est invalide, l'ancien est conservé et l'erreur apparaît dans
    `/health`.
@@ -284,14 +283,14 @@ Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_win
 (une colonne par feature, plus `session_id` et `label`), `predictions` (alertes en JSONB,
 écrites à chaque envoi au backend : c'est l'état de chaque appareil lu par backend-api),
 `recording_sessions`. Elles sont créées par
-`sentinel-x-g4/infra/postgres/init/02-detection.sql` (hypertables TimescaleDB pour
+`backend_db/db/init/02_detection.sql` (hypertables TimescaleDB pour
 `sensor_readings`, `camera_events` et `feature_windows`). Toute modification de
 `storage/tables.py` doit y être reportée.
 
-Le service écrit aussi la table commune `public.alerts` (`01-schema.sql`, module `alerts.py`) :
+Le service écrit aussi la table commune `public.alerts` (`backend_db/db/init/01_schema.sql`, module `alerts.py`) :
 une ligne à l'**activation** de `feu`, `fuite_gaz` ou `presence` (pas à chaque tick), et une
 par message `sentinelx/{device_id}/alert` de l'ESP. Ces lignes sont écrites sans attendre le
-lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03-notify.sql`) prévient
+lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03_notify.sql`) prévient
 backend-api, qui les diffuse en WebSocket.
 
 Volume indicatif par appareil : environ 430 000 mesures brutes et 170 000 fenêtres par

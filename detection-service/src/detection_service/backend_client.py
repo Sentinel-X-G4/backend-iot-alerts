@@ -15,7 +15,7 @@ Codes interprétés par ce client :
     2xx            → envoyé
     408, 429, 5xx  → réessayé avec backoff exponentiel
     autre 4xx      → abandonné (erreur de contrat, journalisée)
-Une implémentation de référence se trouve dans fake_backend/app.py.
+Non utilisé dans la pile Sentinel-X : backend-api lit les résultats en base.
 =============================================================================
 
 Ordre et priorité :

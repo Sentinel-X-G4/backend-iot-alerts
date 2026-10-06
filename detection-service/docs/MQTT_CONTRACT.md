@@ -8,14 +8,14 @@ JSON Schema : [`schemas/sensor_message.schema.json`](schemas/sensor_message.sche
 
 ## Connexion
 
-| Paramètre | Pile complète (dépôt `main`) | Pile isolée (ce dossier) | Variable du service |
+| Paramètre | Pile complète (dépôt `main`) | Lancement local (broker de test) | Variable du service |
 |---|---|---|---|
-| Broker | `mqtt.sentinel.lan:8883` (réseau `sentinel-back`) | `mosquitto:1883` (réseau `iot-net`) | `MQTT_HOST`, `MQTT_PORT` |
+| Broker | `mqtt.sentinel.lan:8883` (réseau `sentinel-back`) | `localhost:1883` | `MQTT_HOST`, `MQTT_PORT` |
 | TLS | obligatoire (CA `ca.crt`) | désactivé | `MQTT_TLS`, `MQTT_TLS_CA_CERTS` |
 | Authentification | compte `detection` (+ ACL) | aucune | `MQTT_USERNAME`, `MQTT_PASSWORD` |
 | QoS | 0 en entrée, 1 pour les résultats | idem | `MQTT_QOS`, `MQTT_RESULT_QOS` |
 
-Comptes et droits de la pile complète : `sentinel-x-g4/infra/mosquitto/config/acl`
+Comptes et droits de la pile complète : `infrastructure/infra/mosquitto/config/acl`
 (`sentinel_iot` = ESP, `vision` = caméra, `detection` = ce service, `iot-backend` = backend-api).
 
 ## Topics
@@ -100,10 +100,10 @@ résultat dans `detection.predictions`. Le corps est exactement le payload décr
 
 ```bash
 # Écouter ce que reçoit le broker
-docker compose exec mosquitto mosquitto_sub -t 'sentinelx/#' -v
+mosquitto_sub -h localhost -t 'sentinelx/#' -v
 
 # Publier un message à la main
-docker compose exec mosquitto mosquitto_pub -t sentinelx/esp01/telemetry \
+mosquitto_pub -h localhost -t sentinelx/esp01/telemetry \
   -m '{"temp": null, "hum": null, "pir": 0, "gas_raw": 180, "gas_do": 1}'
 
 # Vérifier que le service l'accepte (compteurs received / invalid)

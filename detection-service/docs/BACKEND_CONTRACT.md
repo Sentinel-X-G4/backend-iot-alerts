@@ -4,8 +4,7 @@
 > `sentinelx/{device_id}/detection` (QoS 1, `MQTT_RESULT_TOPIC`). La route HTTP décrite
 > ici n'est utilisée que si `MQTT_RESULT_TOPIC` est vide.
 
-> **À implémenter côté backend.** La route n'existe pas encore. Une implémentation de
-> référence exécutable se trouve dans [`../fake_backend/app.py`](../fake_backend/app.py).
+> Non utilisée dans la pile : backend-api lit ces résultats en base (`detection.predictions`).
 
 JSON Schema du corps : [`schemas/alert_payload.schema.json`](schemas/alert_payload.schema.json)
 
