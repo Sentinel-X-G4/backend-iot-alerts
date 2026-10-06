@@ -4,7 +4,7 @@ Deux origines :
 - détection : une alerte à l'**activation** de feu / fuite_gaz / presence (pas à chaque tick) ;
 - ESP : message brut sur `sentinelx/{device_id}/alert`, ex. {"type": "pir", "value": true}.
 
-Une insertion déclenche un NOTIFY (trigger de backend_db) : backend-api la diffuse en WebSocket.
+Une insertion déclenche un NOTIFY (trigger de database) : backend-api la diffuse en WebSocket.
 """
 
 from __future__ import annotations

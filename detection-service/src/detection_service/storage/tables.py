@@ -1,6 +1,6 @@
 """Tables SQLAlchemy Core (sans schéma : il est appliqué via schema_translate_map).
 
-Le schéma PostgreSQL est défini à un seul endroit : dépôt backend_db, db/init/02_detection.sql
+Le schéma PostgreSQL est défini à un seul endroit : dépôt database, db/init/02_detection.sql
 (et 01_schema.sql pour `alerts`). Toute modification ici doit y être reportée (le service ne crée
 aucune table).
 """

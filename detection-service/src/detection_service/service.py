@@ -74,7 +74,7 @@ class Service:
     async def _db_bootstrap(self) -> None:
         """Connexion avec reprises : une base absente ne bloque pas l'inférence.
 
-        Le schéma n'est pas créé ici : il est défini dans le dépôt backend_db (db/init/).
+        Le schéma n'est pas créé ici : il est défini dans le dépôt database (db/init/).
         """
         delay = 1.0
         while True:

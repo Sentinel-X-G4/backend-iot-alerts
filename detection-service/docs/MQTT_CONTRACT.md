@@ -15,7 +15,7 @@ JSON Schema : [`schemas/sensor_message.schema.json`](schemas/sensor_message.sche
 | Authentification | compte `detection` (+ ACL) | aucune | `MQTT_USERNAME`, `MQTT_PASSWORD` |
 | QoS | 0 en entrée, 1 pour les résultats | idem | `MQTT_QOS`, `MQTT_RESULT_QOS` |
 
-Comptes et droits de la pile complète : `infrastructure/infra/mosquitto/config/acl`
+Comptes et droits de la pile complète : `infrastructure/mosquitto/config/acl`
 (`sentinel_iot` = ESP, `vision` = caméra, `detection` = ce service, `iot-backend` = backend-api).
 
 ## Topics

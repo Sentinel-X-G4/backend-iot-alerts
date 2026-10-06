@@ -60,7 +60,7 @@ d'entraînement.
 
 Le service n'a pas de compose propre : il est lancé par le **seul** `docker-compose.yml` du
 dépôt [`main`](https://github.com/Sentinel-X-G4/main) (conteneur `sentinel-detection`), avec
-Mosquitto en MQTTS et la base `backend_db`.
+Mosquitto en MQTTS et la base `database`.
 
 ```bash
 # depuis main/
@@ -78,9 +78,9 @@ Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans le `.env` de
 
 ### Intégration avec les autres conteneurs
 
-- **Base PostgreSQL** : c'est la base unique du projet, dépôt `backend_db`. Son schéma, y
+- **Base PostgreSQL** : c'est la base unique du projet, dépôt `database`. Son schéma, y
   compris le schéma `detection` de ce service, est défini à un seul endroit :
-  `backend_db/db/init/`. Le service ne crée aucune table. Sans `DATABASE_URL`, rien n'est
+  `database/db/init/`. Le service ne crée aucune table. Sans `DATABASE_URL`, rien n'est
   persisté. Si la base est injoignable, le service continue de détecter : les écritures
   restent en mémoire (bornée) et sont réessayées.
 - **Alertes et états** : le service est le seul abonné MQTT ; backend-api lit ses résultats
@@ -137,7 +137,7 @@ principales :
 Ces choix ont été validés avant le développement ou pris par défaut. Ils sont tous
 configurables :
 
-- **Base** : PostgreSQL/TimescaleDB (dépôt `backend_db`), jointe par `DATABASE_URL`. Les
+- **Base** : PostgreSQL/TimescaleDB (dépôt `database`), jointe par `DATABASE_URL`. Les
   tables du service sont dans un schéma dédié (`detection`), à côté des tables communes.
 - **Backend** : backend-api lit la base. L'envoi HTTP (`docs/BACKEND_CONTRACT.md`, route
   `POST /api/alerts`) n'est utilisé que si `MQTT_RESULT_TOPIC` est vide.
@@ -283,11 +283,11 @@ Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_win
 (une colonne par feature, plus `session_id` et `label`), `predictions` (alertes en JSONB,
 écrites à chaque envoi au backend : c'est l'état de chaque appareil lu par backend-api),
 `recording_sessions`. Elles sont créées par
-`backend_db/db/init/02_detection.sql` (hypertables TimescaleDB pour
+`database/db/init/02_detection.sql` (hypertables TimescaleDB pour
 `sensor_readings`, `camera_events` et `feature_windows`). Toute modification de
 `storage/tables.py` doit y être reportée.
 
-Le service écrit aussi la table commune `public.alerts` (`backend_db/db/init/01_schema.sql`, module `alerts.py`) :
+Le service écrit aussi la table commune `public.alerts` (`database/db/init/01_schema.sql`, module `alerts.py`) :
 une ligne à l'**activation** de `feu`, `fuite_gaz` ou `presence` (pas à chaque tick), et une
 par message `sentinelx/{device_id}/alert` de l'ESP. Ces lignes sont écrites sans attendre le
 lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03_notify.sql`) prévient
