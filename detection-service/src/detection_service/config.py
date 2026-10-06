@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     mqtt_client_id: str = "detection-service"
     mqtt_sensor_topic: str = "sentinelx/{device_id}/telemetry"
     mqtt_camera_topic: str = "sentinelx/{device_id}/camera"
+    mqtt_esp_alert_topic: str = "sentinelx/{device_id}/alert"
     mqtt_qos: int = Field(0, ge=0, le=2)
     mqtt_result_topic: str | None = "sentinelx/{device_id}/detection"
     """Topic des résultats ; vide = envoi HTTP au backend (BACKEND_URL) à la place."""

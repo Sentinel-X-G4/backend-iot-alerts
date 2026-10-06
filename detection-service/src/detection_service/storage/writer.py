@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 # Ordre d'écriture (les sessions avant les fenêtres qui les référencent)
 # et ordre inverse de sacrifice quand la mémoire est pleine.
-KINDS: tuple[str, ...] = ("sessions", "predictions", "feature_windows", "camera_events", "sensor_readings")
+KINDS: tuple[str, ...] = ("sessions", "alerts", "predictions", "feature_windows", "camera_events", "sensor_readings")
 _DROP_ORDER: tuple[str, ...] = ("sensor_readings", "camera_events", "feature_windows", "predictions")
 
 
@@ -56,6 +56,7 @@ class BatchWriter:
         self._wake = asyncio.Event()
         self._sinks: dict[str, Callable[[Sequence[Any]], Awaitable[None]]] = {
             "sessions": storage.upsert_sessions,
+            "alerts": storage.insert_alerts,
             "predictions": storage.insert_predictions,
             "feature_windows": storage.insert_feature_windows,
             "camera_events": storage.insert_camera_events,
@@ -71,7 +72,7 @@ class BatchWriter:
         self.queues[kind].append(row)
         if self.buffered > self.max_buffered_rows:
             self._shed()
-        if len(self.queues[kind]) >= self.batch_size:
+        if kind == "alerts" or len(self.queues[kind]) >= self.batch_size:  # alerte : écrite sans attendre
             self._wake.set()
 
     def _shed(self) -> None:

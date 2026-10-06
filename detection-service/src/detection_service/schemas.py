@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator
 
@@ -82,6 +82,15 @@ class CameraMessage(BaseModel):
 
     ts: int | None = Field(None, description="Horodatage appareil en ms (informatif)")
     person: bool = Field(..., description="Personne détectée")
+
+
+class EspAlertMessage(BaseModel):
+    """Topic `sentinelx/{device_id}/alert` : alerte brute de l'ESP, ex. {"type": "pir", "value": true}."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: str = Field(..., min_length=1, max_length=64)
+    value: Any = None
 
 
 # --------------------------------------------------------------------------- #

@@ -282,10 +282,17 @@ Options : `--device`, `--rate`, `--camera-rate`, `--loop`, `--device-warmup`, `-
 
 Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_windows`
 (une colonne par feature, plus `session_id` et `label`), `predictions` (alertes en JSONB,
-écrites à chaque envoi au backend), `recording_sessions`. Elles sont créées par
+écrites à chaque envoi au backend : c'est l'état de chaque appareil lu par backend-api),
+`recording_sessions`. Elles sont créées par
 `sentinel-x-g4/infra/postgres/init/02-detection.sql` (hypertables TimescaleDB pour
 `sensor_readings`, `camera_events` et `feature_windows`). Toute modification de
 `storage/tables.py` doit y être reportée.
+
+Le service écrit aussi la table commune `public.alerts` (`01-schema.sql`, module `alerts.py`) :
+une ligne à l'**activation** de `feu`, `fuite_gaz` ou `presence` (pas à chaque tick), et une
+par message `sentinelx/{device_id}/alert` de l'ESP. Ces lignes sont écrites sans attendre le
+lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03-notify.sql`) prévient
+backend-api, qui les diffuse en WebSocket.
 
 Volume indicatif par appareil : environ 430 000 mesures brutes et 170 000 fenêtres par
 jour. Avec TimescaleDB, prévoir une politique de rétention, par exemple

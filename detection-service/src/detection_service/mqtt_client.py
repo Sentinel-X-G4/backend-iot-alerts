@@ -19,12 +19,13 @@ import aiomqtt
 from pydantic import ValidationError
 
 from .config import Settings
-from .schemas import CameraEvent, CameraMessage, SensorMessage, SensorReading
+from .schemas import CameraEvent, CameraMessage, EspAlertMessage, SensorMessage, SensorReading
 
 log = logging.getLogger(__name__)
 
 SensorHandler = Callable[[SensorReading], None]
 CameraHandler = Callable[[CameraEvent], None]
+EspAlertHandler = Callable[[str, float, EspAlertMessage], None]
 ClientHandler = Callable[[aiomqtt.Client | None], None]
 
 
@@ -61,11 +62,14 @@ class MqttStats:
 class MessageDispatcher:
     """Décode et valide un message ; indépendant du client MQTT (testable)."""
 
-    def __init__(self, settings: Settings, on_sensor: SensorHandler, on_camera: CameraHandler) -> None:
+    def __init__(self, settings: Settings, on_sensor: SensorHandler, on_camera: CameraHandler,
+                 on_esp_alert: EspAlertHandler | None = None) -> None:
         self.sensor_topic = TopicPattern(settings.mqtt_sensor_topic)
         self.camera_topic = TopicPattern(settings.mqtt_camera_topic)
+        self.esp_alert_topic = TopicPattern(settings.mqtt_esp_alert_topic)
         self.on_sensor = on_sensor
         self.on_camera = on_camera
+        self.on_esp_alert = on_esp_alert
         self.stats = MqttStats()
 
     def _invalid(self, topic: str, reason: str, detail: object) -> None:
@@ -87,6 +91,9 @@ class MessageDispatcher:
                 cam = CameraMessage.model_validate(json.loads(payload))
                 self.on_camera(CameraEvent(device_id, received_at, cam.ts, cam.person))
                 return True
+            if self.on_esp_alert and (device_id := self.esp_alert_topic.device_id(topic)) is not None:
+                self.on_esp_alert(device_id, received_at, EspAlertMessage.model_validate(json.loads(payload)))
+                return True
             self._invalid(topic, "unknown_topic", "")
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             self._invalid(topic, "bad_json", exc)
@@ -96,6 +103,11 @@ class MessageDispatcher:
             log.exception("erreur pendant le traitement d'un message", extra={"topic": topic})
             self._invalid(topic, "handler_error", exc)
         return False
+
+    @property
+    def filters(self) -> list[str]:
+        topics = [self.sensor_topic, self.camera_topic, *([self.esp_alert_topic] if self.on_esp_alert else [])]
+        return [t.filter for t in topics]
 
 
 def _tls_params(settings: Settings) -> aiomqtt.TLSParameters | None:
@@ -127,7 +139,7 @@ async def run_mqtt(settings: Settings, dispatcher: MessageDispatcher, on_client:
                 tls_insecure=settings.mqtt_tls_insecure if settings.mqtt_tls else None,
                 keepalive=30,
             ) as client:
-                for topic in (dispatcher.sensor_topic.filter, dispatcher.camera_topic.filter):
+                for topic in dispatcher.filters:
                     await client.subscribe(topic, qos=settings.mqtt_qos)
                 stats.connected = True
                 stats.connections += 1
@@ -136,7 +148,7 @@ async def run_mqtt(settings: Settings, dispatcher: MessageDispatcher, on_client:
                 log.info(
                     "MQTT connecté",
                     extra={"host": settings.mqtt_host, "port": settings.mqtt_port,
-                           "topics": [dispatcher.sensor_topic.filter, dispatcher.camera_topic.filter]},
+                           "topics": dispatcher.filters},
                 )
                 if on_client is not None:
                     on_client(client)

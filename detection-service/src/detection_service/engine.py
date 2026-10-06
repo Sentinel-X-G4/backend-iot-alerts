@@ -12,13 +12,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .alerts import activated, detection_alert, esp_alert
 from .baseline import GasBaseline
 from .buffers import DeviceBuffers
 from .config import Settings
 from .features import compute_features, nan_to_none
 from .postprocess import AlertResult, PostProcessor, global_status
 from .predictors import Predictor
-from .schemas import AlertOut, AlertPayload, CameraEvent, SensorReading, to_utc
+from .schemas import AlertOut, AlertPayload, CameraEvent, EspAlertMessage, SensorReading, to_utc
 from .storage import BatchWriter, FeatureWindowRow, PredictionRow, RecordingSession
 
 log = logging.getLogger(__name__)
@@ -147,6 +148,12 @@ class DetectionEngine:
         if self.writer:
             self.writer.put("camera_events", e)
 
+    def on_esp_alert(self, device_id: str, received_at: float, msg: EspAlertMessage) -> None:
+        row = esp_alert(device_id, received_at, msg)
+        if row and self.writer:
+            self.writer.put("alerts", row)
+            log.info("alerte ESP", extra={"device_id": device_id, "type": msg.type})
+
     def set_predictor(self, predictor: Predictor) -> None:
         self.predictor = predictor
 
@@ -192,6 +199,7 @@ class DetectionEngine:
             previous = dev.last_result
             result = dev.tick(now, self.predictor, self._on_predict_error)
             self._store_window(dev, result)
+            self._store_alerts(previous, result)
             changed = previous is None or previous.key() != result.key()
             heartbeat_due = dev.last_sent_at is None or now - dev.last_sent_at >= self.settings.heartbeat_interval_s
             if changed or heartbeat_due:
@@ -210,6 +218,20 @@ class DetectionEngine:
                                                          "device_state": result.device_state})
                 emitted.append(payload)
         return emitted
+
+    def _store_alerts(self, previous: TickResult | None, result: TickResult) -> None:
+        new = activated(previous.alerts if previous else [], result.alerts)
+        if not new or not self.writer:
+            return
+        metrics = self._metrics(result.features)
+        for alert in new:
+            self.writer.put("alerts", detection_alert(result.device_id, result.window_end, alert,
+                                                      self.predictor.version, metrics))
+            log.info("alerte activée", extra={"device_id": result.device_id, "type": alert.type})
+
+    @staticmethod
+    def _metrics(features: dict[str, float]) -> dict[str, float | None]:
+        return {k: (None if math.isnan(v) else round(v, 4)) for k, v in features.items()}
 
     def _store_window(self, dev: DevicePipeline, result: TickResult) -> None:
         if not self.writer or result.device_state != "ok":
@@ -234,6 +256,6 @@ class DetectionEngine:
                          since=to_utc(a.since) if a.since is not None else None, source=a.source)
                 for a in result.alerts
             ],
-            metrics={k: (None if math.isnan(v) else round(v, 4)) for k, v in result.features.items()},
+            metrics=self._metrics(result.features),
             model_version=self.predictor.version,
         )

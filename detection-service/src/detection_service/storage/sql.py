@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from ..alerts import AlertRow
 from ..features import FEATURE_NAMES
 from ..schemas import CameraEvent, SensorReading, to_utc
 from . import tables as t
@@ -98,6 +99,9 @@ class SqlStorage(Storage):
             t.predictions,
             [{**asdict(r), "window_end": to_utc(r.window_end)} for r in rows],
         )
+
+    async def insert_alerts(self, rows: Sequence[AlertRow]) -> None:
+        await self._insert(t.alerts, [{**asdict(r), "time": to_utc(r.time)} for r in rows])
 
     async def upsert_sessions(self, rows: Sequence[RecordingSession]) -> None:
         if not rows:

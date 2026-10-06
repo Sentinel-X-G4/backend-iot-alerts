@@ -1,7 +1,8 @@
 """Tables SQLAlchemy Core (sans schéma : il est appliqué via schema_translate_map).
 
-Le schéma PostgreSQL est défini à un seul endroit : sentinel-x-g4/infra/postgres/init/02-detection.sql.
-Toute modification ici doit y être reportée (le service ne crée aucune table).
+Le schéma PostgreSQL est défini à un seul endroit : sentinel-x-g4/infra/postgres/init/02-detection.sql
+(et 01-schema.sql pour `alerts`). Toute modification ici doit y être reportée (le service ne crée
+aucune table).
 """
 
 from __future__ import annotations
@@ -84,6 +85,21 @@ predictions = Table(
     Column("metrics", _Json, nullable=False),
     Column("model_version", String(128), nullable=False),
     Index("ix_predictions_device_window", "device_id", "window_end"),
+)
+
+# Table commune de l'infra (schéma public), lue par backend-api
+alerts = Table(
+    "alerts",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("time", _Ts, nullable=False),
+    Column("device_id", Text),
+    Column("source", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("title", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("metadata", _Json, nullable=False),
+    schema="public",
 )
 
 recording_sessions = Table(

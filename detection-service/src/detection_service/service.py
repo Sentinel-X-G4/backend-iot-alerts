@@ -33,7 +33,8 @@ class Service:
         # Échoue au démarrage avec un message clair si le modèle est incompatible.
         self.engine = DetectionEngine(settings, predictor or create_predictor(settings), self.writer,
                                       self.sender.enqueue)
-        self.dispatcher = MessageDispatcher(settings, self.engine.on_sensor, self.engine.on_camera)
+        self.dispatcher = MessageDispatcher(settings, self.engine.on_sensor, self.engine.on_camera,
+                                            self.engine.on_esp_alert)
         self.model_loaded_at = time.time()
         self.model_reload_error: str | None = None
         self._stop = asyncio.Event()

@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
+from ..alerts import AlertRow
 from ..schemas import CameraEvent, SensorReading
 from .base import FeatureWindowRow, PredictionRow, RecordingSession, Storage
 
@@ -19,6 +20,7 @@ class MemoryStorage(Storage):
         self.camera_events: deque[CameraEvent] = deque(maxlen=max_rows)
         self.feature_windows: deque[FeatureWindowRow] = deque(maxlen=max_rows)
         self.predictions: deque[PredictionRow] = deque(maxlen=max_rows)
+        self.alerts: deque[AlertRow] = deque(maxlen=max_rows)
         self.sessions: dict[uuid.UUID, RecordingSession] = {}
         self.fail = False
         """Pour les tests : simule une panne de base."""
@@ -46,6 +48,10 @@ class MemoryStorage(Storage):
     async def insert_predictions(self, rows: Sequence[PredictionRow]) -> None:
         self._check()
         self.predictions.extend(rows)
+
+    async def insert_alerts(self, rows: Sequence[AlertRow]) -> None:
+        self._check()
+        self.alerts.extend(rows)
 
     async def upsert_sessions(self, rows: Sequence[RecordingSession]) -> None:
         self._check()

@@ -24,6 +24,7 @@ Comptes et droits de la pile complète : `sentinel-x-g4/infra/mosquitto/config/a
 |---|---|---|
 | `sentinelx/{device_id}/telemetry` | ~5 msg/s (toutes les 200 ms) | mesures de l'ESP8266 |
 | `sentinelx/{device_id}/camera` | libre (1 msg/s conseillé) | détection de personne |
+| `sentinelx/{device_id}/alert` | ponctuel | alerte brute de l'ESP → ligne dans `public.alerts` |
 | `sentinelx/{device_id}/detection` | changement d'état + heartbeat 10 s | **sortie** : résultats du service (QoS 1) |
 
 - `{device_id}` : identifiant de l'appareil (sans `/`), ex. `esp01`. La caméra d'une pièce
@@ -78,9 +79,20 @@ la caméra n'a rien publié dans la fenêtre, sa dernière valeur reste valable 
 `CAMERA_HOLD_S` (5 s). Si la caméra ne publie **qu'aux changements**, augmenter
 `CAMERA_HOLD_S` en conséquence. Le mieux reste de publier périodiquement (≥ 1 msg/s).
 
+## `sentinelx/{device_id}/alert`
+
+```json
+{"type": "pir", "value": true}
+```
+
+`type` : chaîne de 1 à 64 caractères (obligatoire). `value` : facultatif ; `false` = fin de
+l'alerte, ignorée. Chaque message accepté crée une alerte `medium` dans `public.alerts`
+(source `esp/{device_id}`), diffusée au dashboard par backend-api. Motif : `MQTT_ESP_ALERT_TOPIC`.
+
 ## `sentinelx/{device_id}/detection` (sortie)
 
-Publié par le service, lu par `backend-api`. Le corps est exactement le payload décrit dans
+Publié par le service, à titre informatif : backend-api ne lit plus MQTT, il lit le même
+résultat dans `detection.predictions`. Le corps est exactement le payload décrit dans
 [`BACKEND_CONTRACT.md`](BACKEND_CONTRACT.md) (statut, alertes, métriques). Avec
 `MQTT_RESULT_TOPIC` vide, ce payload part en HTTP vers `BACKEND_URL` à la place.
 

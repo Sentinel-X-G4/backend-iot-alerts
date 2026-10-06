@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..alerts import AlertRow
 from ..schemas import CameraEvent, SensorReading
 
 
@@ -65,6 +66,9 @@ class Storage(ABC):
 
     @abstractmethod
     async def insert_predictions(self, rows: Sequence[PredictionRow]) -> None: ...
+
+    @abstractmethod
+    async def insert_alerts(self, rows: Sequence[AlertRow]) -> None: ...
 
     @abstractmethod
     async def upsert_sessions(self, rows: Sequence[RecordingSession]) -> None: ...
