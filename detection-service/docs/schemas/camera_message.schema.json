@@ -1,0 +1,28 @@
+{
+  "description": "Topic `maison/{device_id}/camera`.",
+  "properties": {
+    "ts": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Horodatage appareil en ms (informatif)",
+      "title": "Ts"
+    },
+    "person": {
+      "description": "Personne détectée",
+      "title": "Person",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "person"
+  ],
+  "title": "CameraMessage",
+  "type": "object"
+}

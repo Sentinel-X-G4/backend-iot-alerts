@@ -1,0 +1,98 @@
+# Pile de développement : service de détection + Mosquitto + PostgreSQL/TimescaleDB + faux backend.
+#
+#   cp .env.example .env
+#   docker compose up --build                      # service, broker, base, faux backend
+#   docker compose --profile sim up simulator      # injecte des données simulées
+#
+# Intégration future :
+# - Base externe (ex. celle du backend) : retirer « local-db » de COMPOSE_PROFILES et pointer
+#   DATABASE_URL dessus. Les tables vont dans le schéma DB_SCHEMA (défaut « detection »).
+# - Les autres piles (backend, conteneur qui publie en MQTT) rejoignent le réseau nommé
+#   « iot-net » avec `networks: { iot: { external: true, name: iot-net } }`.
+
+name: iot-detection
+
+networks:
+  iot:
+    name: ${IOT_NETWORK:-iot-net}
+
+volumes:
+  pgdata:
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "${MQTT_PUBLISHED_PORT:-1883}:1883"
+    networks: [iot]
+    restart: unless-stopped
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot}
+      POSTGRES_DB: ${POSTGRES_DB:-iot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
+    networks: [iot]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  fake-backend:
+    build: ./fake_backend
+    environment:
+      BACKEND_TOKEN: ${BACKEND_TOKEN:-}
+    ports:
+      - "${FAKE_BACKEND_PUBLISHED_PORT:-8080}:8080"
+    networks: [iot]
+    restart: unless-stopped
+
+  detection-service:
+    build:
+      context: .
+      args:
+        INSTALL_ORANGE: ${INSTALL_ORANGE:-false}
+    image: iot-detection-service:dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://iot:iot@postgres:5432/iot}
+      BACKEND_URL: ${BACKEND_URL:-http://fake-backend:8080}
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "${API_PUBLISHED_PORT:-8000}:8000"
+    networks: [iot]
+    depends_on:
+      mosquitto:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+        required: false  # absent si la base est externe
+    restart: unless-stopped
+
+  simulator:
+    image: iot-detection-service:dev
+    profiles: ["sim"]
+    command:
+      - python
+      - tools/simulator.py
+      - --host=mosquitto
+      - --device=${SIM_DEVICE:-esp01}
+      - --sequence=${SIM_SEQUENCE:-normal:150,presence:30,normal:30,fuite_gaz:45,normal:60,feu:120,capteur_muet:20}
+    networks: [iot]
+    depends_on: [mosquitto]
+    healthcheck:
+      disable: true  # l'image hérite du healthcheck HTTP du service, sans objet ici

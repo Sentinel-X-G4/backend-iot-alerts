@@ -1,0 +1,134 @@
+{
+  "$defs": {
+    "AlertOut": {
+      "properties": {
+        "type": {
+          "enum": [
+            "feu",
+            "fuite_gaz",
+            "presence"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "confidence": {
+          "description": "Probabilité lissée",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Début de l'alerte active, sinon null",
+          "title": "Since"
+        },
+        "source": {
+          "default": "model",
+          "enum": [
+            "model",
+            "rule"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "active",
+        "confidence"
+      ],
+      "title": "AlertOut",
+      "type": "object"
+    }
+  },
+  "description": "Corps du POST envoyé au backend.",
+  "properties": {
+    "device_id": {
+      "title": "Device Id",
+      "type": "string"
+    },
+    "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "status": {
+      "description": "Alerte active la plus prioritaire (feu > fuite_gaz > presence > aucune)",
+      "enum": [
+        "feu",
+        "fuite_gaz",
+        "presence",
+        "aucune"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "device_state": {
+      "description": "ok, ou raison de l'absence de prédiction (warming_up, no_data, stale)",
+      "enum": [
+        "ok",
+        "warming_up",
+        "no_data",
+        "stale"
+      ],
+      "title": "Device State",
+      "type": "string"
+    },
+    "reason": {
+      "enum": [
+        "state_change",
+        "heartbeat"
+      ],
+      "title": "Reason",
+      "type": "string"
+    },
+    "alerts": {
+      "items": {
+        "$ref": "#/$defs/AlertOut"
+      },
+      "title": "Alerts",
+      "type": "array"
+    },
+    "metrics": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Metrics",
+      "type": "object"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "device_id",
+    "timestamp",
+    "status",
+    "device_state",
+    "reason",
+    "alerts",
+    "metrics",
+    "model_version"
+  ],
+  "title": "AlertPayload",
+  "type": "object"
+}

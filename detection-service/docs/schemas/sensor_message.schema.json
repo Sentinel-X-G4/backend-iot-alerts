@@ -1,0 +1,81 @@
+{
+  "description": "Topic `maison/{device_id}/capteurs` (~5 msg/s).",
+  "properties": {
+    "ts": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Horodatage appareil en ms (informatif, non fiable)",
+      "title": "Ts"
+    },
+    "temp": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Température °C (DHT22), null si non lue",
+      "title": "Temp"
+    },
+    "hum": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Humidité %HR (DHT22), null si non lue",
+      "title": "Hum"
+    },
+    "pir": {
+      "description": "Mouvement PIR (0/1)",
+      "title": "Pir",
+      "type": "boolean"
+    },
+    "gas_raw": {
+      "description": "MQ-2 sortie AO, ADC 10 bits",
+      "maximum": 1023,
+      "minimum": 0,
+      "title": "Gas Raw",
+      "type": "integer"
+    },
+    "gas_do": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "MQ-2 sortie DO brute : 0 = seuil dépassé (actif bas), 1 = normal. Optionnel.",
+      "title": "Gas Do"
+    },
+    "warmup": {
+      "default": false,
+      "description": "true tant que l'appareil chauffe ses capteurs",
+      "title": "Warmup",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "pir",
+    "gas_raw"
+  ],
+  "title": "SensorMessage",
+  "type": "object"
+}
