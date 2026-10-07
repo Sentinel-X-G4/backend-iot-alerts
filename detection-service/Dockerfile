@@ -1,19 +1,21 @@
 FROM python:3.12-slim
 
-# INSTALL_ORANGE=true installe orange3 (lourd) pour charger directement les .pkcls.
-# Sinon, convertir les modèles avec tools/export_orange_to_joblib.py et PREDICTOR=sklearn.
-ARG INSTALL_ORANGE=false
+# Versions de l'application Orange qui produit les .pkcls (Aide → À propos) : un modèle
+# picklé ne se recharge de façon fiable qu'avec les mêmes orange3 et scikit-learn.
+# Orange 3.40.0 (macOS) embarque Python 3.12 et scikit-learn 1.5.2.
+ARG ORANGE_VERSION=3.40.0
+ARG SKLEARN_VERSION=1.5.2
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN if [ "$INSTALL_ORANGE" = "true" ]; then EXTRAS="sklearn,orange"; else EXTRAS="sklearn"; fi \
-    && pip install ".[${EXTRAS}]"
+RUN pip install . "orange3==${ORANGE_VERSION}" "scikit-learn==${SKLEARN_VERSION}"
 
 COPY tools ./tools
 

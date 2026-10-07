@@ -4,8 +4,7 @@ Surveillance d'une pièce : un ESP8266 (PIR, MQ-2, DHT22) et une caméra publien
 Ce service calcule des métriques sur des fenêtres glissantes et les passe à un modèle
 entraîné dans **Orange Data Mining**. Il lisse les prédictions, applique des règles de
 sécurité et envoie les alertes (`presence`, `fuite_gaz`, `feu`) au backend. Tout est stocké
-dans PostgreSQL, y compris les sessions étiquetées qui servent à construire le jeu
-d'entraînement.
+dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
 
 ## Architecture
 
@@ -22,8 +21,8 @@ d'entraînement.
      │   engine : un DevicePipeline par appareil             │      BatchWriter
      │   ┌───────────┐   ┌────────────┐   ┌───────────────┐  │  (file bornée, lots,
      │   │ buffers   │──▶│ features   │──▶│ predictor     │  │──▶ reprises) ──▶ PostgreSQL
-     │   │ (tampons  │   │ (fonction  │   │ rules/orange/ │  │                  schéma « detection »
-     │   │ circulaires)  │ pure)      │   │ sklearn       │  │
+     │   │ (tampons  │   │ (fonction  │   │ rules ou      │  │                  schéma « detection »
+     │   │ circulaires)  │ pure)      │   │ Orange .pkcls │  │
      │   └───────────┘   └─────▲──────┘   └──────┬────────┘  │
      │        baseline gaz ────┘                 ▼           │
      │                                  postprocess          │      BackendSender
@@ -42,7 +41,7 @@ d'entraînement.
 | `buffers.py` | Tampons circulaires horodatés par appareil et par signal. |
 | `features.py` | **Calcul pur des features**, seule source de vérité (temps réel = entraînement). |
 | `baseline.py` | Baseline lente du MQ-2 (médiane initiale puis EMA, gelée pendant les alertes). |
-| `predictors/` | `RuleBasedPredictor`, `OrangePredictor` (.pkcls), `SklearnPredictor` (.joblib). |
+| `predictors/` | `RuleBasedPredictor`, `OrangePredictor` (.pkcls de `models/`, détectés automatiquement). |
 | `postprocess.py` | Lissage, hystérésis K/M, filet de sécurité gaz, priorité des statuts. |
 | `engine.py` | Orchestration par appareil, états (`warming_up`, `no_data`, `stale`), payloads. |
 | `backend_client.py` | Envoi HTTP non bloquant avec file bornée et retries. |
@@ -90,10 +89,10 @@ Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans le `.env` de
 
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"            # + ".[orange]" pour charger les .pkcls
+pip install -e ".[dev]"
 # un broker MQTT local, par exemple : docker run -d -p 1883:1883 eclipse-mosquitto:2 \
 #   mosquitto -c /mosquitto-no-auth.conf
-export MQTT_HOST=localhost
+export MQTT_HOST=localhost MODELS_DIR=models
 detection-service
 python tools/simulator.py --sequence normal:150,fuite_gaz:45,normal:60
 ```
@@ -107,7 +106,6 @@ pytest                                   # tests unitaires et d'intégration (si
 TEST_DATABASE_URL=postgresql+asyncpg://iot:iot@localhost:5432/iot pytest tests/test_postgres.py
 ```
 
-`tests/test_orange.py` entraîne de vrais modèles Orange (ignoré si `orange3` est absent).
 Le test du vrai broker MQTT est ignoré si aucun Mosquitto n'écoute sur `localhost:1883`.
 
 ## Configuration
@@ -123,9 +121,10 @@ principales :
 | `SHORT_WINDOW_S`, `LONG_WINDOW_S` | `2`, `60` | Fenêtres courte et longue. |
 | `WARMUP_SECONDS` | `120` | Préchauffage sans prédiction. |
 | `BASELINE_TAU_S` | `600` | Constante de temps de la baseline gaz. |
-| `PREDICTOR` | `rules` | `rules`, `orange` ou `sklearn`. |
+| `PREDICTOR` | `auto` | `auto` (modèles Orange s'ils sont présents, sinon règles), `orange` ou `rules`. |
+| `MODELS_DIR` | `/models` | Dossier des `.pkcls` exportés par Orange. |
 | `MODEL_MODE` | `multilabel` | `multilabel` (un modèle binaire par alerte) ou `multiclass`. |
-| `MODEL_PATH` / `MODEL_PATHS` | — | Modèle unique (multi-classe) / JSON type → chemin (multi-label). |
+| `MODEL_PATH` / `MODEL_PATHS` | — | Chemins explicites, prioritaires sur `MODELS_DIR`. |
 | `ALERT_THRESHOLD_ON/OFF`, `ALERT_K_ON`, `ALERT_M_OFF` | `0.6`, `0.4`, `3`, `6` | Hystérésis. `ALERT_OVERRIDES` pour régler un type. |
 | `SAFETY_GAS_CRITICAL`, `SAFETY_GAS_DO_TICKS` | `800`, `4` | Filet de sécurité gaz. |
 | `BACKEND_URL`, `BACKEND_ALERT_ROUTE`, `BACKEND_TOKEN` | —, `/api/alerts` | Envoi des alertes. |
@@ -143,8 +142,8 @@ configurables :
   `POST /api/alerts`) n'est utilisé que si `MQTT_RESULT_TOPIC` est vide.
 - **MQTT** : le format d'entrée est imposé par ce service (`docs/MQTT_CONTRACT.md`). Le
   conteneur qui relaie l'ESP et la caméra s'y conforme.
-- **Modèle** : mode **multi-label** par défaut. Tant qu'aucun modèle n'est entraîné, le
-  `RuleBasedPredictor` est utilisé.
+- **Modèle** : mode **multi-label** par défaut. Tant qu'aucun `.pkcls` n'est déposé dans
+  `models/`, le `RuleBasedPredictor` est utilisé.
 - **Caméra** : publication périodique supposée. Sinon, augmenter `CAMERA_HOLD_S`.
 - **Appareil `no_data` / `stale`** : les alertes ne sont pas recalculées. Le dernier état est
   renvoyé figé, avec `device_state` pour que le backend sache qu'il n'est plus confirmé.
@@ -185,10 +184,13 @@ ticks) → `ok` (prédiction). Ensuite `no_data` si la fenêtre courte contient 
    le modèle plante.
 4. Statut global par priorité : `feu` > `fuite_gaz` > `presence` > `aucune`.
 
-## Workflow d'entraînement avec Orange
+## Modèles Orange
 
-1. **Collecter des sessions étiquetées.** Pendant que le service tourne, chaque situation
-   réelle est enregistrée comme une session :
+L'entraînement se fait entièrement dans l'application **Orange Data Mining**. Le service ne
+fait que charger les modèles exportés et les appliquer aux features en temps réel.
+
+1. **Enregistrer des situations réelles.** Pendant que le service tourne, chaque situation
+   provoquée devant les capteurs est enregistrée comme une session étiquetée :
 
    ```bash
    curl -X POST localhost:8000/recording/start -H 'Content-Type: application/json' \
@@ -197,68 +199,48 @@ ticks) → `ok` (prédiction). Ensuite `no_data` si la fenêtre courte contient 
    curl -X POST localhost:8000/recording/stop -H 'Content-Type: application/json' -d '{"device_id": "esp01"}'
    ```
 
-   Labels : `aucune`, `presence`, `fuite_gaz`, `feu`. Pour des alertes simultanées, les
-   combiner avec `+` (ex. `presence+fuite_gaz`). Viser **plusieurs sessions par classe**
-   (≥ 5), dans des conditions variées : jours, températures, distances. Enregistrer aussi
-   beaucoup de `aucune`, y compris des situations pièges : cuisine, déodorant, porte ouverte.
+   Labels : `aucune`, `presence`, `fuite_gaz`, `feu`, combinables avec `+` (ex.
+   `presence+fuite_gaz`). Enregistrer aussi des `aucune`, y compris des situations pièges :
+   cuisine, déodorant, porte ouverte.
 
-   Le simulateur peut enregistrer ses scénarios pour tester la chaîne :
-   `python tools/simulator.py --sequence normal:60,fuite_gaz:60,feu:90 --record`.
-
-2. **Exporter en CSV.**
+2. **Exporter les fenêtres en CSV pour Orange** (depuis main/) :
 
    ```bash
-   python tools/export_dataset.py --list-sessions
+   docker compose exec -T detection-service python tools/export_dataset.py --list-sessions
    # Multi-label : un fichier par alerte, cible binaire <type>/aucune
-   python tools/export_dataset.py -o exports/feu.csv --target feu --orange-flags
-   python tools/export_dataset.py -o exports/fuite_gaz.csv --target fuite_gaz --orange-flags
-   python tools/export_dataset.py -o exports/presence.csv --target presence --orange-flags
+   docker compose exec -T detection-service python tools/export_dataset.py --target feu --orange-flags > feu.csv
    # Multi-classe : labels bruts
-   python tools/export_dataset.py -o exports/dataset.csv --orange-flags
+   docker compose exec -T detection-service python tools/export_dataset.py --orange-flags > dataset.csv
    ```
 
-   Colonnes : les 14 features, puis `label` et `session_id`. `--orange-flags` écrit
-   `cD#label` et `mS#session_id` : Orange prend directement `label` comme cible et
-   `session_id` comme méta.
+   Colonnes : les 14 features, puis `label` (cible) et `session_id` (méta). Avec
+   `--orange-flags`, Orange les reconnaît seul. Dans Orange, les features doivent rester
+   numériques, et le découpage entraînement/test doit se faire par `session_id`.
 
-3. **Entraîner dans Orange.** `File` → `Data Sampler` ou `Test and Score`, avec un découpage
-   **par session** : réserver des `session_id` entiers pour le test, par exemple en filtrant
-   les sessions avec `Select Rows`. Ne jamais mélanger les fenêtres au hasard : deux fenêtres
-   consécutives (0,5 s d'écart) sont presque identiques, et un mélange aléatoire donne des
-   scores excellents mais faux. Choisir un learner (Random Forest, régression logistique…)
-   puis `Save Model` → fichier `.pkcls`.
+3. **Déposer les modèles.** Exporter chaque modèle avec le widget `Save Model` dans
+   `detection-service/models/` (monté sur `/models` dans le conteneur), sous ces noms :
 
-4. **Déployer.**
+   | Mode (`MODEL_MODE`) | Fichiers |
+   |---|---|
+   | `multilabel` (défaut) | `feu.pkcls`, `fuite_gaz.pkcls`, `presence.pkcls` (un type sans fichier vaut 0) |
+   | `multiclass` | `model.pkcls` |
 
-   ```bash
-   cp feu.pkcls fuite_gaz.pkcls presence.pkcls models/
-   # .env
-   PREDICTOR=orange            # nécessite INSTALL_ORANGE=true pour l'image Docker
-   MODEL_MODE=multilabel
-   MODEL_PATHS={"feu": "/models/feu.pkcls", "fuite_gaz": "/models/fuite_gaz.pkcls", "presence": "/models/presence.pkcls"}
-   MODEL_VERSION=orange-rf-v1
-   ```
-
-   Au démarrage, le service vérifie que chaque colonne attendue par le modèle existe dans ses
-   features et identifie la classe positive. En cas de problème, il s'arrête avec un message
-   explicite. Les types d'alerte sans modèle valent 0, mais le filet de sécurité gaz reste
-   actif.
-
-   **Plan B sans orange3 dans l'image** : convertir sur la machine qui a Orange :
-
-   ```bash
-   python tools/export_orange_to_joblib.py models/feu.pkcls   # → feu.joblib + feu.json
-   # PREDICTOR=sklearn, MODEL_PATHS={"feu": "/models/feu.joblib", ...}
-   ```
-
-   La conversion reproduit l'imputation d'Orange (testé : probabilités identiques). Elle
-   refuse les modèles avec d'autres prétraitements (normalisation…). Dans ce cas, utiliser
-   `PREDICTOR=orange`.
-
-5. **Recharger sans redémarrer** : `docker compose kill -s HUP detection-service` (depuis main/), ou
+   Avec `PREDICTOR=auto` (défaut), le service les utilise dès qu'ils sont présents, sinon il
+   reste sur le `RuleBasedPredictor`. Prise en compte : au démarrage, ou sans redémarrer avec
+   `docker compose kill -s HUP detection-service` (depuis main/) ou
    `curl -X POST localhost:8000/admin/reload-model -H "Authorization: Bearer $ADMIN_TOKEN"`.
-   Si le nouveau modèle est invalide, l'ancien est conservé et l'erreur apparaît dans
-   `/health`.
+   `/health` → `model` indique le predictor actif, les fichiers chargés et `version`
+   (`orange-<empreinte>`, qui change à chaque nouveau modèle).
+
+   Au chargement, le service vérifie que chaque colonne attendue par le modèle existe dans ses
+   features et identifie la classe positive. En cas de problème, il s'arrête au démarrage
+   (ou garde l'ancien modèle lors d'un rechargement) avec un message explicite. Le filet de
+   sécurité gaz reste actif dans tous les cas.
+
+   **Versions** : un `.pkcls` est un pickle Python. L'image Docker installe donc les mêmes
+   `orange3` et `scikit-learn` que l'application Orange (3.40.0 / 1.5.2, arguments
+   `ORANGE_VERSION` et `SKLEARN_VERSION` du `Dockerfile`). Les mettre à jour si l'application
+   Orange change de version. Les `.pkcls` ne sont pas versionnés dans git (`.gitignore`).
 
 ## Simulateur
 
@@ -275,7 +257,7 @@ python tools/simulator.py --sequence normal:150,presence:30,fuite_gaz:45,normal:
 | `capteur_muet` | plus aucun message |
 | `dht_nan` | lectures DHT22 ratées (`null`) |
 
-Options : `--device`, `--rate`, `--camera-rate`, `--loop`, `--device-warmup`, `--record`.
+Options : `--device`, `--rate`, `--camera-rate`, `--loop`, `--device-warmup`.
 
 ## Base de données
 

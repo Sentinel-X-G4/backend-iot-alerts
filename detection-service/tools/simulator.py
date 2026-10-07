@@ -6,11 +6,6 @@ Scénarios : normal, presence, fuite_gaz, feu, capteur_muet, dht_nan.
 Exemples :
     python tools/simulator.py --sequence normal:150,fuite_gaz:60,normal:60
     python tools/simulator.py --device esp02 --sequence presence:30 --loop
-    python tools/simulator.py --sequence normal:60,fuite_gaz:60 --record --api http://localhost:8000
-
-Avec --record, chaque scénario est enregistré comme session étiquetée via l'API
-du service (POST /recording/start|stop) : pratique pour tester l'export du dataset.
-L'étiquette utilisée est le nom du scénario (normal → « aucune »).
 """
 
 from __future__ import annotations
@@ -29,9 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from detection_service.simulation import RoomSimulator, parse_sequence  # noqa: E402
 
-RECORD_LABELS = {"normal": "aucune", "presence": "presence", "fuite_gaz": "fuite_gaz", "feu": "feu"}
-
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--host", default="localhost")
@@ -48,20 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device-warmup", type=float, default=0.0, help="secondes initiales avec warmup=true")
     p.add_argument("--loop", action="store_true", help="rejouer la séquence indéfiniment")
     p.add_argument("--seed", type=int)
-    p.add_argument("--record", action="store_true", help="enregistrer chaque scénario comme session étiquetée")
-    p.add_argument("--api", default="http://localhost:8000", help="API du service (avec --record)")
     return p.parse_args()
-
-
-async def record(api: str, action: str, body: dict) -> None:
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.post(f"{api}/recording/{action}", json=body)
-            print(f"  recording/{action} → {r.status_code}")
-    except httpx.HTTPError as exc:
-        print(f"  recording/{action} impossible : {exc}")
 
 
 async def main() -> None:
@@ -80,9 +59,6 @@ async def main() -> None:
         while True:
             for scenario, duration in sequence:
                 print(f"[{time.strftime('%H:%M:%S')}] {args.device} : {scenario} pendant {duration:.0f} s")
-                if args.record and scenario in RECORD_LABELS:
-                    await record(args.api, "start", {"label": RECORD_LABELS[scenario], "device_id": args.device,
-                                                     "notes": f"simulateur:{scenario}"})
                 end = time.time() + duration
                 next_cam = time.time()
                 while (now := time.time()) < end:
@@ -95,8 +71,6 @@ async def main() -> None:
                         if cam is not None:
                             await client.publish(camera_topic, json.dumps(cam))
                     await asyncio.sleep(max(0.0, period - (time.time() - now)))
-                if args.record and scenario in RECORD_LABELS:
-                    await record(args.api, "stop", {"device_id": args.device})
             if not args.loop:
                 break
 

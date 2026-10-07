@@ -1,25 +1,68 @@
 from __future__ import annotations
 
-from ..config import PredictorKind, Settings
+import hashlib
+import logging
+from collections.abc import Iterable
+from pathlib import Path
+
+from ..config import ALERT_TYPES, ModelMode, PredictorKind, Settings
 from .base import ModelLoadError, Predictor
 from .rules import RuleBasedPredictor
 
-__all__ = ["ModelLoadError", "Predictor", "RuleBasedPredictor", "create_predictor"]
+__all__ = ["ModelLoadError", "Predictor", "RuleBasedPredictor", "create_predictor", "find_models"]
+
+log = logging.getLogger(__name__)
+
+MODEL_SUFFIX = ".pkcls"
+MULTICLASS_FILE = "model.pkcls"
+
+
+def find_models(settings: Settings) -> tuple[Path | None, dict[str, Path]]:
+    """(modèle multi-classe, modèles multi-label) : chemins explicites, sinon fichiers de MODELS_DIR.
+
+    Multi-label : `<type>.pkcls` pour chaque type présent (feu, fuite_gaz, presence).
+    Multi-classe : `model.pkcls`.
+    """
+    if settings.model_mode == ModelMode.MULTICLASS:
+        if settings.model_path:
+            return settings.model_path, {}
+        path = settings.models_dir / MULTICLASS_FILE
+        return (path if path.is_file() else None), {}
+    if settings.model_paths:
+        return None, dict(settings.model_paths)
+    found = {t: settings.models_dir / f"{t}{MODEL_SUFFIX}" for t in ALERT_TYPES}
+    return None, {t: p for t, p in found.items() if p.is_file()}
+
+
+def fingerprint(paths: Iterable[Path]) -> str:
+    """Version dérivée du contenu des fichiers : change dès qu'un modèle est remplacé."""
+    h = hashlib.sha256()
+    for path in sorted(paths, key=str):
+        h.update(path.read_bytes())
+    return f"orange-{h.hexdigest()[:8]}"
 
 
 def create_predictor(settings: Settings) -> Predictor:
     """Construit le predictor configuré. Lève ModelLoadError avec un message explicite."""
-    if settings.predictor == PredictorKind.RULES:
-        return RuleBasedPredictor(settings.rules_gas_delta, settings.rules_temp_slope_c_per_min,
-                                  settings.model_version)
-    if settings.predictor == PredictorKind.ORANGE:
-        from .orange import OrangePredictor as cls
-    else:
-        from .sklearn import SklearnPredictor as cls  # type: ignore[assignment]
-    return cls.from_paths(
-        settings.model_mode.value,
-        str(settings.model_path) if settings.model_path else None,
-        {t: str(p) for t, p in settings.model_paths.items()},
-        settings.model_version,
-        settings.model_negative_class,
-    )
+    if settings.predictor != PredictorKind.RULES:
+        model_path, model_paths = find_models(settings)
+        if model_path or model_paths:
+            from .orange import OrangePredictor
+
+            predictor = OrangePredictor.from_paths(
+                settings.model_mode.value,
+                str(model_path) if model_path else None,
+                {t: str(p) for t, p in model_paths.items()},
+                "",
+                settings.model_negative_class,
+            )
+            predictor.version = settings.model_version or fingerprint([model_path] if model_path else model_paths.values())
+            return predictor
+        expected = MULTICLASS_FILE if settings.model_mode == ModelMode.MULTICLASS else \
+            ", ".join(f"{t}{MODEL_SUFFIX}" for t in ALERT_TYPES)
+        if settings.predictor == PredictorKind.ORANGE:
+            raise ModelLoadError(f"PREDICTOR=orange : aucun modèle dans {settings.models_dir} (attendu : {expected})")
+        log.warning("aucun modèle Orange, predictor à règles utilisé",
+                    extra={"models_dir": str(settings.models_dir), "expected": expected})
+    return RuleBasedPredictor(settings.rules_gas_delta, settings.rules_temp_slope_c_per_min,
+                              settings.model_version or "rules-v1")

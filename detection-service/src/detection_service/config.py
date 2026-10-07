@@ -21,9 +21,10 @@ class ModelMode(str, Enum):
 
 
 class PredictorKind(str, Enum):
+    AUTO = "auto"
+    """Modèles Orange s'ils sont trouvés (MODELS_DIR ou chemins explicites), sinon règles."""
     RULES = "rules"
     ORANGE = "orange"
-    SKLEARN = "sklearn"
 
 
 class AlertParams(BaseModel):
@@ -72,13 +73,16 @@ class Settings(BaseSettings):
     baseline_init_ticks: int = Field(10, ge=1)
 
     # --- Modèle ----------------------------------------------------------
-    predictor: PredictorKind = PredictorKind.RULES
+    predictor: PredictorKind = PredictorKind.AUTO
     model_mode: ModelMode = ModelMode.MULTILABEL
+    models_dir: Path = Path("/models")
+    """Dossier des .pkcls exportés par Orange : <type>.pkcls (multi-label) ou model.pkcls (multi-classe)."""
     model_path: Path | None = None
-    """Mode multi-classe : chemin du modèle unique (.pkcls ou .joblib)."""
+    """Mode multi-classe : chemin du modèle unique ; vide = MODELS_DIR/model.pkcls."""
     model_paths: Annotated[dict[str, Path], NoDecode] = Field(default_factory=dict)
-    """Mode multi-label : JSON {"presence": "...", "fuite_gaz": "...", "feu": "..."}."""
-    model_version: str = "rules-v1"
+    """Mode multi-label : JSON {"presence": "...", ...} ; vide = MODELS_DIR/<type>.pkcls présents."""
+    model_version: str | None = None
+    """Libellé envoyé au backend ; vide = « rules-v1 » ou « orange-<empreinte des fichiers> »."""
     model_negative_class: str = "aucune"
     rules_gas_delta: float = Field(150.0, gt=0)
     """RuleBasedPredictor : écart à la baseline (unités ADC) à partir duquel le gaz est suspect."""
@@ -126,7 +130,7 @@ class Settings(BaseSettings):
     log_json: bool = False
 
     @field_validator(
-        "mqtt_username", "mqtt_password", "mqtt_tls_ca_certs", "mqtt_result_topic", "model_path", "backend_url", "backend_token",
+        "mqtt_username", "mqtt_password", "mqtt_tls_ca_certs", "mqtt_result_topic", "model_path", "model_version", "backend_url", "backend_token",
         "database_url", "admin_token", mode="before",
     )
     @classmethod

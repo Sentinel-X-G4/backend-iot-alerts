@@ -35,7 +35,7 @@ class Predictor(ABC):
 
 
 class ProbModel(Protocol):
-    """Un modèle chargé (Orange ou sklearn) : features ordonnées, classes, probabilités."""
+    """Un modèle Orange chargé : features ordonnées, classes, probabilités."""
 
     path: str
     feature_names: Sequence[str]
@@ -86,7 +86,7 @@ def clamp01(x: float) -> float:
 
 
 class ModelPredictor(Predictor):
-    """Socle commun Orange / sklearn. Les sous-classes fournissent `load_model(path)`."""
+    """Socle des predictors à modèles. Les sous-classes fournissent `load_model(path)`."""
 
     def __init__(self, mode: str, models: Mapping[str, ProbModel], version: str, negative_class: str = "aucune"):
         self.mode = mode

@@ -4,6 +4,5 @@ __pycache__/
 .pytest_cache/
 .env
 *.egg-info/
-detection-service/models/*
 !detection-service/models/.gitkeep
 detection-service/exports/

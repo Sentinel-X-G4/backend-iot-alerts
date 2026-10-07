@@ -51,10 +51,7 @@ def load_orange_model(path: str) -> OrangeModel:
     try:
         import Orange  # noqa: F401
     except ImportError as exc:
-        raise ModelLoadError(
-            "Le paquet orange3 n'est pas installé : `pip install .[orange]`, ou convertissez le modèle "
-            "avec tools/export_orange_to_joblib.py et utilisez PREDICTOR=sklearn."
-        ) from exc
+        raise ModelLoadError("Le paquet orange3 n'est pas installé : `pip install -e .`") from exc
     with open(path, "rb") as fh:
         model = pickle.load(fh)  # noqa: S301 — fichier de confiance produit par Orange
     return OrangeModel(path, model)

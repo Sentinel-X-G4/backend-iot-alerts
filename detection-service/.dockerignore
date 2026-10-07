@@ -3,5 +3,4 @@
 .pytest_cache
 .env
 exports
-models
 tests
