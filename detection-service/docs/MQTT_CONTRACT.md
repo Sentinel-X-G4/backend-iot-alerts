@@ -16,7 +16,8 @@ JSON Schema : [`schemas/sensor_message.schema.json`](schemas/sensor_message.sche
 | QoS | 0 en entrée, 1 pour les résultats | idem | `MQTT_QOS`, `MQTT_RESULT_QOS` |
 
 Comptes et droits de la pile complète : `infrastructure/mosquitto/config/acl`
-(`sentinel_iot` = ESP, `vision` = caméra, `detection` = ce service, `iot-backend` = backend-api).
+(`sentinel_iot` = ESP, `vision` = caméra, `detection` = ce service, seul service serveur sur MQTT ;
+`iot-backend` = debug en lecture seule).
 
 ## Topics
 
@@ -26,6 +27,8 @@ Comptes et droits de la pile complète : `infrastructure/mosquitto/config/acl`
 | `sentinelx/{device_id}/camera` | libre (1 msg/s conseillé) | détection de personne |
 | `sentinelx/{device_id}/alert` | ponctuel | alerte brute de l'ESP → ligne dans `public.alerts` |
 | `sentinelx/{device_id}/detection` | changement d'état + heartbeat 10 s | **sortie** : résultats du service (QoS 1) |
+| `sentinelx/{device_id}/cmd` | ponctuel | **sortie** : commande vers l'ESP (QoS 1), voir plus bas |
+| `sentinelx/{device_id}/ack` | réponse à chaque commande | acquittement de l'ESP |
 
 - `{device_id}` : identifiant de l'appareil (sans `/`), ex. `esp01`. La caméra d'une pièce
   doit publier avec le **même `device_id`** que l'ESP de cette pièce : les deux flux sont
@@ -73,8 +76,13 @@ Comptes et droits de la pile complète : `infrastructure/mosquitto/config/acl`
 |---|---|---|---|
 | `ts` | entier (ms epoch) | non | Informatif. |
 | `person` | booléen | **oui** | Personne détectée dans l'image. |
-| `identity` | `"none"` \| `"authorized"` \| `"unknown"` | non | Reconnaissance faciale (`human-detection-ia`). **Ignoré par le service.** |
-| `names` | tableau de chaînes | non | Personnes autorisées reconnues. **Ignoré par le service.** |
+| `identity` | `"none"` \| `"authorized"` \| `"unknown"` | non | Reconnaissance faciale (`human-detection-ia`). Hors modèle : enregistré dans `detection.camera_state`. |
+| `names` | tableau de chaînes (20 max) | non | Personnes autorisées reconnues. Hors modèle : enregistré dans `detection.camera_state`. |
+| `faces` | `[{"name": "Alice" \| null}]` (20 max) | non | Visages vus (`null` = inconnu). Hors modèle : enregistré dans `detection.camera_state`. |
+
+**Dernier état de la caméra** : `detection.camera_state` (une ligne par `device_id`), réécrit à
+chaque changement de `person` / `identity` / `names` / `faces` et au moins toutes les
+`HEARTBEAT_INTERVAL_S` (10 s) ; backend-api le lit pour le dashboard (`/overview`, `/camera`).
 
 La feature `cam_ratio` est la proportion de `true` reçus sur les 2 dernières secondes. Si
 la caméra n'a rien publié dans la fenêtre, sa dernière valeur reste valable pendant
@@ -97,6 +105,28 @@ Publié par le service, à titre informatif : backend-api ne lit plus MQTT, il l
 résultat dans `detection.predictions`. Le corps est exactement le payload décrit dans
 [`BACKEND_CONTRACT.md`](BACKEND_CONTRACT.md) (statut, alertes, métriques). Avec
 `MQTT_RESULT_TOPIC` vide, ce payload part en HTTP vers `BACKEND_URL` à la place.
+
+## `sentinelx/{device_id}/cmd` / `ack` (commandes vers l'ESP)
+
+Publiées par l'API du service (`POST /devices/{device_id}/alert|buzzer|led|screen|reset`, jeton
+`ADMIN_TOKEN`), elle-même appelée par backend-api pour le dashboard. La requête HTTP attend
+l'acquittement de même `id` (`COMMAND_ACK_TIMEOUT_S`, 5 s) : `504` sans réponse.
+
+```json
+{"id": "6f1c…", "command": "screen", "state": "message", "text": "Evacuation salle B"}
+{"id": "6f1c…", "command": "screen", "ok": true, "state": {"alert": "off", "buzzer": "auto", "led": "auto", "screen": "message"}}
+```
+
+| `command` | `state` | Effet |
+|---|---|---|
+| `alert` | `on` \| `off` | alarme : buzzer + LED rouge + « ALERT » à l'écran (sorties en `auto`). L'ESP n'a plus de seuil local : c'est la seule façon de la déclencher |
+| `buzzer` | `on` \| `off` \| `auto` | force le buzzer (`auto` = suit l'alerte) |
+| `led` | `red` \| `green` \| `both` \| `off` \| `auto` | force les LED (`auto` = rouge pendant l'alerte, verte sinon) |
+| `screen` | `auto` \| `off` \| `message` (+ `text`, 100 caractères ASCII) | tableau de bord, écran éteint ou texte |
+| `reset` | — | alerte arrêtée, tout revient en `auto` |
+
+Tout persiste jusqu'au `reset` ou au redémarrage de l'ESP. Refus de l'ESP (`ok: false`, `error`) → `422`.
+Firmware : `software/src/main.cpp` (`handleCommand`).
 
 ## Tester son producteur
 

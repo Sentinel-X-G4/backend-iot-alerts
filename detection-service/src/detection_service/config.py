@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     mqtt_result_topic: str | None = "sentinelx/{device_id}/detection"
     """Topic des résultats ; vide = envoi HTTP au backend (BACKEND_URL) à la place."""
     mqtt_result_qos: int = Field(1, ge=0, le=2)
+    mqtt_command_topic: str = "sentinelx/{device_id}/cmd"
+    """Commandes vers l'ESP (POST /devices/{device_id}/...), QoS 1 ; acquittées sur MQTT_ACK_TOPIC."""
+    mqtt_ack_topic: str = "sentinelx/{device_id}/ack"
+    command_ack_timeout_s: float = Field(5.0, gt=0)
     mqtt_reconnect_min_s: float = 1.0
     mqtt_reconnect_max_s: float = 30.0
 

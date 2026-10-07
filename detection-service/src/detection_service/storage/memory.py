@@ -18,6 +18,7 @@ class MemoryStorage(Storage):
     def __init__(self, max_rows: int = 10_000) -> None:
         self.sensor_readings: deque[SensorReading] = deque(maxlen=max_rows)
         self.camera_events: deque[CameraEvent] = deque(maxlen=max_rows)
+        self.camera_state: dict[str, CameraEvent] = {}
         self.feature_windows: deque[FeatureWindowRow] = deque(maxlen=max_rows)
         self.predictions: deque[PredictionRow] = deque(maxlen=max_rows)
         self.alerts: deque[AlertRow] = deque(maxlen=max_rows)
@@ -40,6 +41,10 @@ class MemoryStorage(Storage):
     async def insert_camera_events(self, rows: Sequence[CameraEvent]) -> None:
         self._check()
         self.camera_events.extend(rows)
+
+    async def upsert_camera_state(self, rows: Sequence[CameraEvent]) -> None:
+        self._check()
+        self.camera_state.update((r.device_id, r) for r in rows)
 
     async def insert_feature_windows(self, rows: Sequence[FeatureWindowRow]) -> None:
         self._check()

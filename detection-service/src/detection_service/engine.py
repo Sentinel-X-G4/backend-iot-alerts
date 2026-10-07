@@ -47,6 +47,8 @@ class DevicePipeline:
     first_sensor_at: float | None = None
     last_sensor_at: float | None = None
     last_camera_at: float | None = None
+    camera_key: tuple | None = None
+    camera_saved_at: float | None = None
     device_warmup: bool = False
     last_result: TickResult | None = None
     last_payload: AlertPayload | None = None
@@ -144,9 +146,19 @@ class DetectionEngine:
             self.writer.put("sensor_readings", r)
 
     def on_camera(self, e: CameraEvent) -> None:
-        self.device(e.device_id).add_camera(e)
-        if self.writer:
-            self.writer.put("camera_events", e)
+        dev = self.device(e.device_id)
+        dev.add_camera(e)
+        if not self.writer:
+            return
+        self.writer.put("camera_events", e)
+        # Dernier état (lu par backend-api) : à chaque changement, et au moins toutes les
+        # HEARTBEAT_INTERVAL_S pour que updated_at dise si la caméra est encore en ligne
+        key = e.state_key()
+        heartbeat_due = (dev.camera_saved_at is None
+                         or e.received_at - dev.camera_saved_at >= self.settings.heartbeat_interval_s)
+        if key != dev.camera_key or heartbeat_due:
+            dev.camera_key, dev.camera_saved_at = key, e.received_at
+            self.writer.put("camera_state", e)
 
     def on_esp_alert(self, device_id: str, received_at: float, msg: EspAlertMessage) -> None:
         row = esp_alert(device_id, received_at, msg)

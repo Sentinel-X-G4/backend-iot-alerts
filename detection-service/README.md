@@ -30,7 +30,7 @@ dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
      │                          filet de sécurité, priorité) │     httpx, backoff)
      └───────────── horloge : tick toutes les 0,5 s ─────────┘
                               │
-                     API FastAPI :8000  (/health, /status, /recording, /admin)
+                     API FastAPI :8000  (/health, /status, /recording, /admin, /devices)
 ```
 
 | Module | Rôle |
@@ -72,6 +72,7 @@ make sim                     # données simulées
 | http://localhost:8000/health | santé (MQTT, base, modèle, appareils) |
 | http://localhost:8000/status/esp01 | dernier résultat d'un appareil |
 | http://localhost:8000/docs | documentation interactive de l'API |
+| `POST /devices/{id}/alert\|buzzer\|led\|screen\|reset` | commandes vers l'ESP (jeton `ADMIN_TOKEN`), relayées depuis le dashboard par backend-api ; voir [`docs/MQTT_CONTRACT.md`](docs/MQTT_CONTRACT.md) |
 
 Pour une démo plus rapide, réduire `WARMUP_SECONDS` (ex. 20) dans le `.env` de main.
 
@@ -264,6 +265,7 @@ Options : `--device`, `--rate`, `--camera-rate`, `--loop`, `--device-warmup`.
 Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_windows`
 (une colonne par feature, plus `session_id` et `label`), `predictions` (alertes en JSONB,
 écrites à chaque envoi au backend : c'est l'état de chaque appareil lu par backend-api),
+`camera_state` (dernier état de chaque caméra, une ligne par appareil, lu par backend-api),
 `recording_sessions`. Elles sont créées par
 `database/db/init/02_detection.sql` (hypertables TimescaleDB pour
 `sensor_readings`, `camera_events` et `feature_windows`). Toute modification de

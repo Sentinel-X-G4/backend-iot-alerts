@@ -8,7 +8,10 @@ import logging
 import signal
 import time
 
+import aiomqtt
+
 from .backend_client import BackendSender
+from .commands import CommandSender
 from .config import Settings
 from .engine import DetectionEngine
 from .mqtt_client import MessageDispatcher, run_mqtt
@@ -33,8 +36,9 @@ class Service:
         # Échoue au démarrage avec un message clair si le modèle est incompatible.
         self.engine = DetectionEngine(settings, predictor or create_predictor(settings), self.writer,
                                       self.sender.enqueue)
+        self.commands = CommandSender(settings)
         self.dispatcher = MessageDispatcher(settings, self.engine.on_sensor, self.engine.on_camera,
-                                            self.engine.on_esp_alert)
+                                            self.engine.on_esp_alert, self.commands.on_ack)
         self.model_loaded_at = time.time()
         self.model_reload_error: str | None = None
         self._stop = asyncio.Event()
@@ -100,6 +104,12 @@ class Service:
         server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
         await server.serve()
 
+    def _bind_mqtt(self, client: aiomqtt.Client | None) -> None:
+        """Connexion MQTT partagée : résultats (si publiés sur MQTT) et commandes vers les ESP."""
+        self.commands.bind(client)
+        if isinstance(self.sender, MqttResultPublisher):
+            self.sender.bind(client)
+
     def request_stop(self) -> None:
         self._stop.set()
 
@@ -119,8 +129,7 @@ class Service:
             db_task = None
             log.warning("DATABASE_URL non défini : rien n'est persisté")
 
-        on_client = self.sender.bind if isinstance(self.sender, MqttResultPublisher) else None
-        mqtt_task = asyncio.create_task(run_mqtt(self.settings, self.dispatcher, on_client), name="mqtt")
+        mqtt_task = asyncio.create_task(run_mqtt(self.settings, self.dispatcher, self._bind_mqtt), name="mqtt")
         tasks = [
             asyncio.create_task(self._ticker(), name="ticker"),
             asyncio.create_task(self._api(), name="api"),

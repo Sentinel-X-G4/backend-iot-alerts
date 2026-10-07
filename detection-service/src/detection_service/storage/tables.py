@@ -61,6 +61,19 @@ camera_events = Table(
     Index("ix_camera_events_device_received", "device_id", "received_at"),
 )
 
+# Dernier état de chaque caméra (une ligne par device_id), lu par backend-api
+camera_state = Table(
+    "camera_state",
+    metadata,
+    Column("device_id", String(64), primary_key=True),
+    Column("updated_at", _Ts, nullable=False),
+    Column("device_ts", BigInteger),
+    Column("person", Boolean, nullable=False),
+    Column("identity", String(16)),
+    Column("names", _Json, nullable=False),
+    Column("faces", _Json, nullable=False),
+)
+
 feature_windows = Table(
     "feature_windows",
     metadata,

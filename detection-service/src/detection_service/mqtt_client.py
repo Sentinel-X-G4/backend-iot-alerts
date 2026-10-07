@@ -19,13 +19,14 @@ import aiomqtt
 from pydantic import ValidationError
 
 from .config import Settings
-from .schemas import CameraEvent, CameraMessage, EspAlertMessage, SensorMessage, SensorReading
+from .schemas import CameraEvent, CameraMessage, CommandAck, EspAlertMessage, SensorMessage, SensorReading
 
 log = logging.getLogger(__name__)
 
 SensorHandler = Callable[[SensorReading], None]
 CameraHandler = Callable[[CameraEvent], None]
 EspAlertHandler = Callable[[str, float, EspAlertMessage], None]
+AckHandler = Callable[[str, CommandAck], None]
 ClientHandler = Callable[[aiomqtt.Client | None], None]
 
 
@@ -63,13 +64,15 @@ class MessageDispatcher:
     """Décode et valide un message ; indépendant du client MQTT (testable)."""
 
     def __init__(self, settings: Settings, on_sensor: SensorHandler, on_camera: CameraHandler,
-                 on_esp_alert: EspAlertHandler | None = None) -> None:
+                 on_esp_alert: EspAlertHandler | None = None, on_ack: AckHandler | None = None) -> None:
         self.sensor_topic = TopicPattern(settings.mqtt_sensor_topic)
         self.camera_topic = TopicPattern(settings.mqtt_camera_topic)
         self.esp_alert_topic = TopicPattern(settings.mqtt_esp_alert_topic)
+        self.ack_topic = TopicPattern(settings.mqtt_ack_topic)
         self.on_sensor = on_sensor
         self.on_camera = on_camera
         self.on_esp_alert = on_esp_alert
+        self.on_ack = on_ack
         self.stats = MqttStats()
 
     def _invalid(self, topic: str, reason: str, detail: object) -> None:
@@ -89,10 +92,14 @@ class MessageDispatcher:
                 return True
             if (device_id := self.camera_topic.device_id(topic)) is not None:
                 cam = CameraMessage.model_validate(json.loads(payload))
-                self.on_camera(CameraEvent(device_id, received_at, cam.ts, cam.person))
+                self.on_camera(CameraEvent(device_id, received_at, cam.ts, cam.person, cam.identity,
+                                           tuple(cam.names), tuple(f.name for f in cam.faces)))
                 return True
             if self.on_esp_alert and (device_id := self.esp_alert_topic.device_id(topic)) is not None:
                 self.on_esp_alert(device_id, received_at, EspAlertMessage.model_validate(json.loads(payload)))
+                return True
+            if self.on_ack and (device_id := self.ack_topic.device_id(topic)) is not None:
+                self.on_ack(device_id, CommandAck.model_validate(json.loads(payload)))
                 return True
             self._invalid(topic, "unknown_topic", "")
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -106,7 +113,8 @@ class MessageDispatcher:
 
     @property
     def filters(self) -> list[str]:
-        topics = [self.sensor_topic, self.camera_topic, *([self.esp_alert_topic] if self.on_esp_alert else [])]
+        topics = [self.sensor_topic, self.camera_topic, *([self.esp_alert_topic] if self.on_esp_alert else []),
+                  *([self.ack_topic] if self.on_ack else [])]
         return [t.filter for t in topics]
 
 

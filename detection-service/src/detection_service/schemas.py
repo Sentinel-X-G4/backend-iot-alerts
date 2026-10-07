@@ -7,11 +7,12 @@ Le payload backend est le **contrat de sortie** (voir docs/BACKEND_CONTRACT.md).
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 AlertType = Literal["feu", "fuite_gaz", "presence"]
 AlertStatus = Literal["feu", "fuite_gaz", "presence", "aucune"]
@@ -75,13 +76,26 @@ class SensorMessage(BaseModel):
         return None if self.gas_do is None else self.gas_do == 0
 
 
+class CameraFace(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = Field(None, max_length=64, description="Personne autorisée reconnue, null si inconnu")
+
+
 class CameraMessage(BaseModel):
-    """Topic `sentinelx/{device_id}/camera`."""
+    """Topic `sentinelx/{device_id}/camera`.
+
+    Seul `person` entre dans le modèle ; `identity`, `names` et `faces` (human-detection-ia) sont
+    enregistrés comme dernier état de la caméra (detection.camera_state), lu par backend-api.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     ts: int | None = Field(None, description="Horodatage appareil en ms (informatif)")
     person: bool = Field(..., description="Personne détectée")
+    identity: str | None = Field(None, max_length=16, description="none | authorized | unknown")
+    names: list[str] = Field(default_factory=list, max_length=20, description="Personnes autorisées reconnues")
+    faces: list[CameraFace] = Field(default_factory=list, max_length=20, description="Visages vus")
 
 
 class EspAlertMessage(BaseModel):
@@ -130,6 +144,14 @@ class CameraEvent:
     received_at: float
     device_ts: int | None
     person: bool
+    identity: str | None = None
+    names: tuple[str, ...] = ()
+    faces: tuple[str | None, ...] = ()
+    """Noms des visages vus (None = inconnu)."""
+
+    def state_key(self) -> tuple:
+        """Ce qui définit un changement d'état de la caméra (detection.camera_state)."""
+        return self.person, self.identity, self.names, self.faces
 
 
 # --------------------------------------------------------------------------- #
@@ -177,6 +199,63 @@ class AlertPayload(BaseModel):
 # --------------------------------------------------------------------------- #
 # API
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Commandes vers l'ESP (POST /devices/{device_id}/..., publiées sur sentinelx/{device_id}/cmd)
+# Contrat côté firmware : software/src/main.cpp (handleCommand)
+# --------------------------------------------------------------------------- #
+SCREEN_TEXT_MAX = 100
+
+
+class AlertCommand(BaseModel):
+    """Alarme de l'ESP (buzzer + LED rouge + « ALERT » à l'écran) : seule façon de la déclencher."""
+
+    state: Literal["on", "off"]
+
+
+class BuzzerCommand(BaseModel):
+    state: Literal["on", "off", "auto"]
+
+
+class LedCommand(BaseModel):
+    state: Literal["red", "green", "both", "off", "auto"]
+
+
+class ScreenCommand(BaseModel):
+    """`text` obligatoire avec `message` : l'OLED n'affiche que l'ASCII (accents retirés)."""
+
+    state: Literal["auto", "off", "message"]
+    text: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _ascii(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = "".join(c for c in unicodedata.normalize("NFD", v) if not unicodedata.combining(c))
+        v = "".join(c if " " <= c <= "~" else " " for c in v).strip()
+        if not 1 <= len(v) <= SCREEN_TEXT_MAX:
+            raise ValueError(f"1 à {SCREEN_TEXT_MAX} caractères")
+        return v
+
+    @model_validator(mode="after")
+    def _text_with_message(self) -> ScreenCommand:
+        if (self.state == "message") != (self.text is not None):
+            raise ValueError("text obligatoire avec state=message, et seulement avec lui")
+        return self
+
+
+class CommandAck(BaseModel):
+    """Topic `sentinelx/{device_id}/ack` : réponse de l'ESP à une commande (même `id`)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., min_length=1, max_length=64)
+    command: str = ""
+    ok: bool
+    error: str | None = None
+    state: dict[str, str] = Field(default_factory=dict, description="alert, buzzer, led, screen")
+
+
 class RecordingStart(BaseModel):
     label: str = Field(..., min_length=1, max_length=64)
     device_id: str = Field(..., min_length=1, max_length=64)

@@ -62,6 +62,10 @@ class Storage(ABC):
     async def insert_camera_events(self, rows: Sequence[CameraEvent]) -> None: ...
 
     @abstractmethod
+    async def upsert_camera_state(self, rows: Sequence[CameraEvent]) -> None:
+        """Dernier état par caméra : seule la ligne la plus récente de chaque device_id compte."""
+
+    @abstractmethod
     async def insert_feature_windows(self, rows: Sequence[FeatureWindowRow]) -> None: ...
 
     @abstractmethod

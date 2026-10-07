@@ -1,15 +1,18 @@
-"""API HTTP du service : santé, dernier statut, enregistrement de sessions étiquetées, admin."""
+"""API HTTP du service : santé, dernier statut, enregistrement de sessions étiquetées, admin,
+commandes vers les ESP (seul point d'envoi MQTT vers les appareils, appelé par backend-api)."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Path
 
+from .commands import BrokerUnavailable
 from .predictors import ModelLoadError
-from .schemas import AlertPayload, RecordingStart, RecordingStop, iso_ms, to_utc
+from .schemas import (AlertCommand, AlertPayload, BuzzerCommand, LedCommand, RecordingStart, RecordingStop,
+                      ScreenCommand, iso_ms, to_utc)
 
 if TYPE_CHECKING:
     from .service import Service
@@ -22,6 +25,10 @@ def _iso(ts: float | None) -> str | None:
 def _session(s: Any) -> dict[str, Any]:
     return {"session_id": str(s.id), "device_id": s.device_id, "label": s.label, "notes": s.notes,
             "started_at": _iso(s.started_at), "ended_at": _iso(s.ended_at)}
+
+
+# Jamais de / + # : l'id entre dans le topic MQTT
+DeviceId = Annotated[str, Path(pattern=r"^[\w.-]{1,64}$")]
 
 
 def create_app(service: Service) -> FastAPI:
@@ -98,6 +105,40 @@ def create_app(service: Service) -> FastAPI:
         if not stopped:
             raise HTTPException(404, "aucune session en cours")
         return {"stopped": [_session(s) for s in stopped]}
+
+    # --- Commandes ESP : publiées sur sentinelx/{device_id}/cmd, réponse = acquittement de l'ESP ---
+    # 200 {command, state: {alert, buzzer, led, screen}} ; 422 refusée par l'ESP ;
+    # 503 broker injoignable ; 504 aucun acquittement (ESP hors ligne)
+    async def command(device_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            ack = await service.commands.send(device_id, body)
+        except BrokerUnavailable as exc:
+            raise HTTPException(503, "broker MQTT injoignable") from exc
+        if ack is None:
+            raise HTTPException(504, f"pas d'acquittement de {device_id} (hors ligne ?)")
+        if not ack.ok:
+            raise HTTPException(422, f"commande refusée par l'appareil : {(ack.error or '')[:100]}")
+        return {"command": ack.command, "state": ack.state}
+
+    @app.post("/devices/{device_id}/alert", dependencies=[Depends(require_admin)])
+    async def command_alert(device_id: DeviceId, body: AlertCommand) -> dict[str, Any]:
+        return await command(device_id, {"command": "alert", **body.model_dump()})
+
+    @app.post("/devices/{device_id}/buzzer", dependencies=[Depends(require_admin)])
+    async def command_buzzer(device_id: DeviceId, body: BuzzerCommand) -> dict[str, Any]:
+        return await command(device_id, {"command": "buzzer", **body.model_dump()})
+
+    @app.post("/devices/{device_id}/led", dependencies=[Depends(require_admin)])
+    async def command_led(device_id: DeviceId, body: LedCommand) -> dict[str, Any]:
+        return await command(device_id, {"command": "led", **body.model_dump()})
+
+    @app.post("/devices/{device_id}/screen", dependencies=[Depends(require_admin)])
+    async def command_screen(device_id: DeviceId, body: ScreenCommand) -> dict[str, Any]:
+        return await command(device_id, {"command": "screen", **body.model_dump(exclude_none=True)})
+
+    @app.post("/devices/{device_id}/reset", dependencies=[Depends(require_admin)])
+    async def command_reset(device_id: DeviceId) -> dict[str, Any]:
+        return await command(device_id, {"command": "reset"})
 
     @app.post("/admin/reload-model", dependencies=[Depends(require_admin)])
     async def reload_model() -> dict[str, Any]:

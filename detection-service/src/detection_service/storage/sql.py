@@ -81,6 +81,27 @@ class SqlStorage(Storage):
             ],
         )
 
+    async def upsert_camera_state(self, rows: Sequence[CameraEvent]) -> None:
+        latest = {r.device_id: r for r in rows}  # lot dans l'ordre d'arrivée : le dernier gagne
+        if not latest:
+            return
+        if self.engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert
+        stmt = insert(t.camera_state).values([
+            {"device_id": r.device_id, "updated_at": to_utc(r.received_at), "device_ts": r.device_ts,
+             "person": r.person, "identity": r.identity, "names": list(r.names),
+             "faces": [{"name": name} for name in r.faces]}
+            for r in latest.values()
+        ])
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["device_id"],
+            set_={c: stmt.excluded[c] for c in ("updated_at", "device_ts", "person", "identity", "names", "faces")},
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(stmt)
+
     async def insert_feature_windows(self, rows: Sequence[FeatureWindowRow]) -> None:
         await self._insert(
             t.feature_windows,

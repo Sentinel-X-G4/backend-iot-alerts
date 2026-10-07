@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# --- Construction : dépendances installées dans /opt/venv -----------------------------------
+FROM python:3.12-slim AS build
 
 # Versions de l'application Orange qui produit les .pkcls (Aide → À propos) : un modèle
 # picklé ne se recharge de façon fiable qu'avec les mêmes orange3 et scikit-learn.
@@ -6,17 +7,35 @@ FROM python:3.12-slim
 ARG ORANGE_VERSION=3.40.0
 ARG SKLEARN_VERSION=1.5.2
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DEFAULT_TIMEOUT=120
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PATH=/opt/venv/bin:$PATH
+
+# openTSNE (dépendance d'orange3) n'a pas de wheel linux/arm64 (Mac Apple Silicon) : compilé
+# ici avec g++, qui ne va pas dans l'image finale
+RUN apt-get update && apt-get install -y --no-install-recommends g++ && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+
+# Dépendances lourdes avant le code : couche en cache tant que les versions ne changent pas
+RUN pip install "orange3==${ORANGE_VERSION}" "scikit-learn==${SKLEARN_VERSION}"
 
 WORKDIR /app
-
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install . "orange3==${ORANGE_VERSION}" "scikit-learn==${SKLEARN_VERSION}"
+RUN pip install .
 
+# --- Image finale ----------------------------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:$PATH
+
+# Bibliothèque OpenMP chargée par openTSNE (compilé dans l'étape build)
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/venv /opt/venv
+
+WORKDIR /app
 COPY tools ./tools
 
 RUN useradd --create-home --uid 1000 app && mkdir -p /models && chown app /models
