@@ -73,6 +73,8 @@ Comptes et droits de la pile complète : `infrastructure/mosquitto/config/acl`
 |---|---|---|---|
 | `ts` | entier (ms epoch) | non | Informatif. |
 | `person` | booléen | **oui** | Personne détectée dans l'image. |
+| `identity` | `"none"` \| `"authorized"` \| `"unknown"` | non | Reconnaissance faciale (`human-detection-ia`). **Ignoré par le service.** |
+| `names` | tableau de chaînes | non | Personnes autorisées reconnues. **Ignoré par le service.** |
 
 La feature `cam_ratio` est la proportion de `true` reçus sur les 2 dernières secondes. Si
 la caméra n'a rien publié dans la fenêtre, sa dernière valeur reste valable pendant
