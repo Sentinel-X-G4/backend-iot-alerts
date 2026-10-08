@@ -104,12 +104,9 @@ Les variables d'environnement ont priorité sur le fichier `.env`.
 
 ### Tests
 
-```bash
-pytest                                   # tests unitaires et d'intégration (simulateur)
-TEST_DATABASE_URL=postgresql+asyncpg://iot:iot@localhost:5432/iot pytest tests/test_postgres.py
-```
-
-Le test du vrai broker MQTT est ignoré si aucun Mosquitto n'écoute sur `localhost:1883`.
+`pytest` est configuré dans `pyproject.toml` (`testpaths = ["tests"]`, extra `[dev]`), mais le
+dossier `tests/` n'est pas présent dans le dépôt : il n'y a pas de suite de tests exécutable.
+Validation actuelle : `make sim` depuis main/ et `GET /health`.
 
 ## Configuration
 
@@ -315,8 +312,8 @@ Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_win
 Le service écrit aussi la table commune `public.alerts` (`database/db/init/01_schema.sql`, module `alerts.py`) :
 une ligne à l'**activation** de `feu`, `fuite_gaz`, `inondation` ou `presence` (pas à chaque tick), et une
 par message `sentinelx/{device_id}/alert` de l'ESP. Ces lignes sont écrites sans attendre le
-lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03_notify.sql`) prévient
-backend-api, qui les diffuse en WebSocket.
+lot suivant et jamais sacrifiées quand la file est pleine. backend-api les lit en interrogeant la base
+(le dashboard redemande `/api/v1/overview` toutes les 0,5 s) ; il n'y a pas de WebSocket.
 
 Volume indicatif par appareil : environ 430 000 mesures brutes et 170 000 fenêtres par
 jour. Avec TimescaleDB, prévoir une politique de rétention, par exemple
