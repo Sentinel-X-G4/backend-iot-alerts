@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Publie de fausses mesures MQTT au format du contrat, selon une suite de scénarios.
 
-Scénarios : normal, presence, fuite_gaz, feu, capteur_muet, dht_nan.
+Scénarios : normal, presence, fuite_gaz, feu, inondation, capteur_muet, dht_nan,
+combinables avec « + » (ex. presence+fuite_gaz).
 
 Exemples :
     python tools/simulator.py --sequence normal:150,fuite_gaz:60,normal:60
@@ -36,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--camera-topic", default="sentinelx/{device_id}/camera")
     p.add_argument("--rate", type=float, default=5.0, help="messages capteurs par seconde")
     p.add_argument("--camera-rate", type=float, default=1.0, help="messages caméra par seconde (0 = aucun)")
-    p.add_argument("--sequence", default="normal:150,presence:30,fuite_gaz:45,normal:60,feu:120,capteur_muet:20")
+    p.add_argument("--sequence", default="normal:150,presence:30,fuite_gaz:45,normal:60,feu:120,normal:180,inondation:90,capteur_muet:20")
     p.add_argument("--device-warmup", type=float, default=0.0, help="secondes initiales avec warmup=true")
     p.add_argument("--loop", action="store_true", help="rejouer la séquence indéfiniment")
     p.add_argument("--seed", type=int)

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from .config import ALERT_TYPES, AlertParams, Settings
 
-PRIORITY: tuple[str, ...] = ALERT_TYPES  # feu > fuite_gaz > presence
+PRIORITY: tuple[str, ...] = ALERT_TYPES  # feu > fuite_gaz > inondation > presence
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,7 +11,7 @@ import time
 import aiomqtt
 
 from .backend_client import BackendSender
-from .commands import CommandSender
+from .commands import CommandSender, EspAlarm
 from .config import Settings
 from .engine import DetectionEngine
 from .mqtt_client import MessageDispatcher, run_mqtt
@@ -34,9 +34,10 @@ class Service:
         )
         self.sender = MqttResultPublisher(settings) if settings.mqtt_result_topic else BackendSender(settings)
         # Échoue au démarrage avec un message clair si le modèle est incompatible.
-        self.engine = DetectionEngine(settings, predictor or create_predictor(settings), self.writer,
-                                      self.sender.enqueue)
         self.commands = CommandSender(settings)
+        self.alarm = EspAlarm(settings, self.commands)
+        self.engine = DetectionEngine(settings, predictor or create_predictor(settings), self.writer,
+                                      self.sender.enqueue, self.alarm.set)
         self.dispatcher = MessageDispatcher(settings, self.engine.on_sensor, self.engine.on_camera,
                                             self.engine.on_esp_alert, self.commands.on_ack)
         self.model_loaded_at = time.time()
@@ -133,6 +134,7 @@ class Service:
         tasks = [
             asyncio.create_task(self._ticker(), name="ticker"),
             asyncio.create_task(self._api(), name="api"),
+            asyncio.create_task(self.alarm.run(), name="esp-alarm"),
         ]
         writer_task = asyncio.create_task(self._writer_when_ready(), name="db-writer")
         sender_task = asyncio.create_task(self.sender.run(), name="backend-sender")

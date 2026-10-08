@@ -20,7 +20,7 @@ MULTICLASS_FILE = "model.pkcls"
 def find_models(settings: Settings) -> tuple[Path | None, dict[str, Path]]:
     """(modèle multi-classe, modèles multi-label) : chemins explicites, sinon fichiers de MODELS_DIR.
 
-    Multi-label : `<type>.pkcls` pour chaque type présent (feu, fuite_gaz, presence).
+    Multi-label : `<type>.pkcls` pour chaque type présent (feu, fuite_gaz, inondation, presence).
     Multi-classe : `model.pkcls`.
     """
     if settings.model_mode == ModelMode.MULTICLASS:
@@ -65,4 +65,4 @@ def create_predictor(settings: Settings) -> Predictor:
         log.warning("aucun modèle Orange, predictor à règles utilisé",
                     extra={"models_dir": str(settings.models_dir), "expected": expected})
     return RuleBasedPredictor(settings.rules_gas_delta, settings.rules_temp_slope_c_per_min,
-                              settings.model_version or "rules-v1")
+                              settings.rules_flood_hum, settings.model_version or "rules-v1")

@@ -119,7 +119,7 @@ l'acquittement de même `id` (`COMMAND_ACK_TIMEOUT_S`, 5 s) : `504` sans répons
 
 | `command` | `state` | Effet |
 |---|---|---|
-| `alert` | `on` \| `off` | alarme : buzzer + LED rouge + « ALERT » à l'écran (sorties en `auto`). L'ESP n'a plus de seuil local : c'est la seule façon de la déclencher |
+| `alert` | `on` \| `off` | alarme : buzzer + LED rouge + « ALERT » à l'écran (sorties en `auto`). L'ESP n'a plus de seuil local : c'est la seule façon de la déclencher. Le service l'envoie aussi **de lui-même** à l'activation d'une alerte (`ESP_ALARM_TYPES`), suivie de `screen message` avec le nom de l'alerte, puis `alert off` et `screen auto` à la fin |
 | `buzzer` | `on` \| `off` \| `auto` | force le buzzer (`auto` = suit l'alerte) |
 | `led` | `red` \| `green` \| `both` \| `off` \| `auto` | force les LED (`auto` = rouge pendant l'alerte, verte sinon) |
 | `screen` | `auto` \| `off` \| `message` (+ `text`, 100 caractères ASCII) | tableau de bord, écran éteint ou texte |

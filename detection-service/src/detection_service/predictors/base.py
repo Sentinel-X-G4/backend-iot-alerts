@@ -1,7 +1,7 @@
 """Interface commune des predictors.
 
 Un predictor reçoit le dictionnaire de features d'une fenêtre et renvoie, pour chaque
-type d'alerte (`feu`, `fuite_gaz`, `presence`), une probabilité entre 0 et 1.
+type d'alerte (`feu`, `fuite_gaz`, `inondation`, `presence`), une probabilité entre 0 et 1.
 Les deux modes de modèle (multi-classe / multi-label) produisent la même sortie.
 """
 

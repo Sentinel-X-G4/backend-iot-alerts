@@ -1,7 +1,7 @@
 """Alertes du dashboard, écrites dans la table `alerts` de l'infra (lue par backend-api).
 
 Deux origines :
-- détection : une alerte à l'**activation** de feu / fuite_gaz / presence (pas à chaque tick) ;
+- détection : une alerte à l'**activation** de feu / fuite_gaz / inondation / presence (pas à chaque tick) ;
 - ESP : message brut sur `sentinelx/{device_id}/alert`, ex. {"type": "pir", "value": true}.
 
 Une insertion déclenche un NOTIFY (trigger de database) : backend-api la diffuse en WebSocket.
@@ -16,8 +16,9 @@ from typing import Any
 from .postprocess import AlertResult
 from .schemas import EspAlertMessage, iso_ms, to_utc
 
-SEVERITY = {"feu": "critical", "fuite_gaz": "critical", "presence": "high"}
-TITLES = {"feu": "Incendie détecté", "fuite_gaz": "Fuite de gaz détectée", "presence": "Présence détectée"}
+SEVERITY = {"feu": "critical", "fuite_gaz": "critical", "inondation": "critical", "presence": "high"}
+TITLES = {"feu": "Incendie détecté", "fuite_gaz": "Fuite de gaz détectée", "inondation": "Inondation détectée",
+          "presence": "Présence détectée"}
 
 
 @dataclass(slots=True)

@@ -46,7 +46,7 @@
       "type": "boolean"
     },
     "gas_raw": {
-      "description": "MQ-2 sortie AO, ADC 10 bits",
+      "description": "MQ-2 sortie AO, ADC 10 bits (`gas` accepté)",
       "maximum": 1023,
       "minimum": 0,
       "title": "Gas Raw",

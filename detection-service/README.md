@@ -3,7 +3,8 @@
 Surveillance d'une pièce : un ESP8266 (PIR, MQ-2, DHT22) et une caméra publient en MQTT.
 Ce service calcule des métriques sur des fenêtres glissantes et les passe à un modèle
 entraîné dans **Orange Data Mining**. Il lisse les prédictions, applique des règles de
-sécurité et envoie les alertes (`presence`, `fuite_gaz`, `feu`) au backend. Tout est stocké
+sécurité et envoie les alertes (`presence`, `fuite_gaz`, `feu`, `inondation`) au backend et à
+l'alarme de l'ESP. Tout est stocké
 dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
 
 ## Architecture
@@ -42,6 +43,7 @@ dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
 | `features.py` | **Calcul pur des features**, seule source de vérité (temps réel = entraînement). |
 | `baseline.py` | Baseline lente du MQ-2 (médiane initiale puis EMA, gelée pendant les alertes). |
 | `predictors/` | `RuleBasedPredictor`, `OrangePredictor` (.pkcls de `models/`, détectés automatiquement). |
+| `commands.py` | Commandes vers l'ESP, dont l'alarme déclenchée par les alertes (`EspAlarm`). |
 | `postprocess.py` | Lissage, hystérésis K/M, filet de sécurité gaz, priorité des statuts. |
 | `engine.py` | Orchestration par appareil, états (`warming_up`, `no_data`, `stale`), payloads. |
 | `backend_client.py` | Envoi HTTP non bloquant avec file bornée et retries. |
@@ -128,6 +130,7 @@ principales :
 | `MODEL_PATH` / `MODEL_PATHS` | — | Chemins explicites, prioritaires sur `MODELS_DIR`. |
 | `ALERT_THRESHOLD_ON/OFF`, `ALERT_K_ON`, `ALERT_M_OFF` | `0.6`, `0.4`, `3`, `6` | Hystérésis. `ALERT_OVERRIDES` pour régler un type. |
 | `SAFETY_GAS_CRITICAL`, `SAFETY_GAS_DO_TICKS` | `800`, `4` | Filet de sécurité gaz. |
+| `ESP_ALARM_TYPES`, `ESP_ALARM_OFF_DELAY_S` | les 4 types, `5` | Alertes qui déclenchent l'alarme de l'ESP. |
 | `BACKEND_URL`, `BACKEND_ALERT_ROUTE`, `BACKEND_TOKEN` | —, `/api/alerts` | Envoi des alertes. |
 | `HEARTBEAT_INTERVAL_S` | `10` | Heartbeat vers le backend. |
 | `DATABASE_URL`, `DB_SCHEMA` | —, `detection` | Stockage (schéma créé par l'infra). |
@@ -183,7 +186,15 @@ ticks) → `ok` (prédiction). Ensuite `no_data` si la fenêtre courte contient 
 3. Filet de sécurité : `gas_max ≥ SAFETY_GAS_CRITICAL`, ou `gas_do_ratio = 1` pendant
    `SAFETY_GAS_DO_TICKS` ticks, force `fuite_gaz` (`source: "rule"`). Il reste actif même si
    le modèle plante.
-4. Statut global par priorité : `feu` > `fuite_gaz` > `presence` > `aucune`.
+4. Statut global par priorité : `feu` > `fuite_gaz` > `inondation` > `presence` > `aucune`.
+5. Alarme de l'ESP : dès qu'une alerte de `ESP_ALARM_TYPES` (par défaut les quatre) est active, le
+   service envoie `alert on` puis le texte de l'alerte à l'écran (`INCENDIE DETECTE`…) sur
+   `sentinelx/{device_id}/cmd`. Il envoie `alert off` et `screen auto` après
+   `ESP_ALARM_OFF_DELAY_S` sans alerte. Sans acquittement de l'ESP, il réessaie toutes les
+   `ESP_ALARM_RETRY_S`. Le dashboard peut toujours forcer ou couper l'alarme.
+
+La présence a par défaut `k_on = 8` (≈ 4 s), au lieu de 3 : en pièce vide, le PIR produit des
+impulsions isolées de 0,6 à 0,9 s qui ne doivent pas déclencher l'alarme.
 
 ## Modèles Orange
 
@@ -200,7 +211,7 @@ fait que charger les modèles exportés et les appliquer aux features en temps r
    curl -X POST localhost:8000/recording/stop -H 'Content-Type: application/json' -d '{"device_id": "esp01"}'
    ```
 
-   Labels : `aucune`, `presence`, `fuite_gaz`, `feu`, combinables avec `+` (ex.
+   Labels : `aucune`, `presence`, `fuite_gaz`, `feu`, `inondation`, combinables avec `+` (ex.
    `presence+fuite_gaz`). Enregistrer aussi des `aucune`, y compris des situations pièges :
    cuisine, déodorant, porte ouverte.
 
@@ -223,7 +234,7 @@ fait que charger les modèles exportés et les appliquer aux features en temps r
 
    | Mode (`MODEL_MODE`) | Fichiers |
    |---|---|
-   | `multilabel` (défaut) | `feu.pkcls`, `fuite_gaz.pkcls`, `presence.pkcls` (un type sans fichier vaut 0) |
+   | `multilabel` (défaut) | `feu.pkcls`, `fuite_gaz.pkcls`, `inondation.pkcls`, `presence.pkcls` (un type sans fichier vaut 0) |
    | `multiclass` | `model.pkcls` |
 
    Avec `PREDICTOR=auto` (défaut), le service les utilise dès qu'ils sont présents, sinon il
@@ -241,20 +252,50 @@ fait que charger les modèles exportés et les appliquer aux features en temps r
    **Versions** : un `.pkcls` est un pickle Python. L'image Docker installe donc les mêmes
    `orange3` et `scikit-learn` que l'application Orange (3.40.0 / 1.5.2, arguments
    `ORANGE_VERSION` et `SKLEARN_VERSION` du `Dockerfile`). Les mettre à jour si l'application
-   Orange change de version. Les `.pkcls` ne sont pas versionnés dans git (`.gitignore`).
+   Orange change de version. Les modèles de départ (`tools/train_models.py`) sont versionnés ;
+   un modèle déposé à la place remplace le fichier du même nom.
+
+### Modèles de départ (données simulées)
+
+`models/` contient quatre modèles générés par `tools/train_models.py`, en attendant assez de
+sessions réelles. Le script simule des sessions étiquetées (gaz ≈ 100, 17–27 °C, 30–78 %RH,
+avec des pièges dans les sessions `aucune`). Il calcule leurs fenêtres avec le vrai pipeline du
+service, y ajoute les fenêtres réelles `aucune` de `exports/temoins_aucune/`, entraîne une forêt
+aléatoire Orange par alerte, la valide par session, puis écrit les `.pkcls` et les CSV
+d'entraînement (`exports/synthetique/`, ouvrables dans Orange). Chaque modèle ne voit que les
+signaux liés à son alerte :
+
+| Modèle | Colonnes |
+|---|---|
+| `presence` | `pir_ratio`, `cam_ratio` |
+| `fuite_gaz` | gaz (`gas_*`), `temp_delta_long`, `temp_slope_long` |
+| `feu` | gaz, `temp_last`, `temp_delta_long`, `temp_slope_long`, `hum_delta_long` |
+| `inondation` | `hum_last`, `hum_delta_long` |
+
+Pour les régénérer (mêmes versions d'Orange que le service, donc dans son image), depuis
+`detection-service/` :
+
+```bash
+docker run --rm -v "$PWD":/work -w /work -e PYTHONPATH=/work/src \
+    --entrypoint python sentinel-x/detection-service:dev tools/train_models.py
+```
+
+Les remplacer par des modèles entraînés sur des sessions réelles dès qu'il y en a assez.
 
 ## Simulateur
 
 ```bash
-python tools/simulator.py --sequence normal:150,presence:30,fuite_gaz:45,normal:60,feu:120,capteur_muet:20
+python tools/simulator.py --sequence normal:150,presence:30,fuite_gaz:45,normal:60,feu:120,normal:180,inondation:90,capteur_muet:20
 ```
 
 | Scénario | Comportement |
 |---|---|
 | `normal` | air propre, légère dérive du MQ-2, pas de mouvement |
 | `presence` | PIR (avec temporisation de 5 s) et caméra à 1 par intermittence |
+| `a+b` | situations simultanées, ex. `presence+fuite_gaz` |
 | `fuite_gaz` | `gas_raw` monte d'environ 450, température stable |
 | `feu` | fumée (`gas_raw` +350) **et** température +3 °C/min |
+| `inondation` | humidité qui monte vers 95 %RH en environ une minute |
 | `capteur_muet` | plus aucun message |
 | `dht_nan` | lectures DHT22 ratées (`null`) |
 
@@ -272,7 +313,7 @@ Tables du schéma `detection` : `sensor_readings`, `camera_events`, `feature_win
 `storage/tables.py` doit y être reportée.
 
 Le service écrit aussi la table commune `public.alerts` (`database/db/init/01_schema.sql`, module `alerts.py`) :
-une ligne à l'**activation** de `feu`, `fuite_gaz` ou `presence` (pas à chaque tick), et une
+une ligne à l'**activation** de `feu`, `fuite_gaz`, `inondation` ou `presence` (pas à chaque tick), et une
 par message `sentinelx/{device_id}/alert` de l'ESP. Ces lignes sont écrites sans attendre le
 lot suivant et jamais sacrifiées quand la file est pleine. Un trigger (`03_notify.sql`) prévient
 backend-api, qui les diffuse en WebSocket.

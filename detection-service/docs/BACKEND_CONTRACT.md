@@ -36,6 +36,7 @@ Le service envoie :
   "alerts": [
     {"type": "feu", "active": false, "confidence": 0.04, "since": null, "source": "model"},
     {"type": "fuite_gaz", "active": true, "confidence": 0.91, "since": "2026-10-05T14:19:58.000Z", "source": "model"},
+    {"type": "inondation", "active": false, "confidence": 0.0, "since": null, "source": "model"},
     {"type": "presence", "active": true, "confidence": 0.77, "since": "2026-10-05T14:15:02.000Z", "source": "model"}
   ],
   "metrics": {
@@ -52,7 +53,7 @@ Le service envoie :
 |---|---|---|
 | `device_id` | string | Appareil (extrait du topic MQTT). |
 | `timestamp` | string ISO 8601 UTC (ms, `Z`) | Fin de la fenêtre analysée (horloge du service). |
-| `status` | `feu` \| `fuite_gaz` \| `presence` \| `aucune` | Alerte active **la plus prioritaire** : `feu` > `fuite_gaz` > `presence` > `aucune`. |
+| `status` | `feu` \| `fuite_gaz` \| `inondation` \| `presence` \| `aucune` | Alerte active **la plus prioritaire** : `feu` > `fuite_gaz` > `inondation` > `presence` > `aucune`. |
 | `device_state` | `ok` \| `warming_up` \| `no_data` \| `stale` | `ok` = prédiction faite. Sinon, raison de l'absence de prédiction (voir plus bas). |
 | `reason` | `state_change` \| `heartbeat` | Pourquoi ce message est envoyé. |
 | `alerts` | tableau, toujours les 3 types | Détail par type d'alerte (les alertes ne sont pas exclusives). |
@@ -97,7 +98,7 @@ Répondre vite (timeout client : `BACKEND_TIMEOUT_S` = 5 s). Faire les traitemen
   (`BACKEND_QUEUE_SIZE` = 500) jette d'abord les heartbeats, puis les changements d'état
   les plus anciens. Le heartbeat suivant (≤ 10 s) resynchronise l'état courant.
 - **Notification** : notifier l'utilisateur sur `reason == "state_change"` quand une alerte
-  `feu` ou `fuite_gaz` passe à `active: true`. Les heartbeats servent au suivi « vu à » et
+  `feu`, `fuite_gaz` ou `inondation` passe à `active: true`. Les heartbeats servent au suivi « vu à » et
   à détecter un service de détection arrêté (aucun message depuis plus de 2 × 10 s).
 - **Historique** : le service garde déjà tout dans sa base (`detection.predictions`,
   `detection.sensor_readings`…). Le backend peut lire ces tables directement s'il partage

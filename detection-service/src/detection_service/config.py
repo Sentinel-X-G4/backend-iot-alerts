@@ -11,7 +11,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-ALERT_TYPES: tuple[str, ...] = ("feu", "fuite_gaz", "presence")
+ALERT_TYPES: tuple[str, ...] = ("feu", "fuite_gaz", "inondation", "presence")
 """Types d'alerte, du plus prioritaire au moins prioritaire."""
 
 
@@ -25,6 +25,11 @@ class PredictorKind(str, Enum):
     """Modèles Orange s'ils sont trouvés (MODELS_DIR ou chemins explicites), sinon règles."""
     RULES = "rules"
     ORANGE = "orange"
+
+
+DEFAULT_ALERT_OVERRIDES: dict[str, dict[str, float]] = {"presence": {"k_on": 8}}
+"""Réglages par défaut d'un type, sous ALERT_OVERRIDES. Présence : 8 ticks (≈ 4 s) pour qu'une
+impulsion isolée du PIR (0,6 à 0,9 s mesurés en pièce vide) ne déclenche pas l'alarme."""
 
 
 class AlertParams(BaseModel):
@@ -59,6 +64,12 @@ class Settings(BaseSettings):
     """Commandes vers l'ESP (POST /devices/{device_id}/...), QoS 1 ; acquittées sur MQTT_ACK_TOPIC."""
     mqtt_ack_topic: str = "sentinelx/{device_id}/ack"
     command_ack_timeout_s: float = Field(5.0, gt=0)
+    esp_alarm_types: Annotated[list[str], NoDecode] = Field(default_factory=lambda: list(ALERT_TYPES))
+    """Alertes qui déclenchent l'alarme de l'ESP (commande `alert`), séparées par des virgules ;
+    vide = jamais. L'alarme s'arrête quand plus aucune de ces alertes n'est active."""
+    esp_alarm_off_delay_s: float = Field(5.0, ge=0)
+    """L'alarme ne s'arrête qu'après ce délai sans alerte (pas de coupure entre deux alertes)."""
+    esp_alarm_retry_s: float = Field(5.0, gt=0)
     mqtt_reconnect_min_s: float = 1.0
     mqtt_reconnect_max_s: float = 30.0
 
@@ -92,6 +103,8 @@ class Settings(BaseSettings):
     """RuleBasedPredictor : écart à la baseline (unités ADC) à partir duquel le gaz est suspect."""
     rules_temp_slope_c_per_min: float = Field(0.5, gt=0)
     """RuleBasedPredictor : hausse de température (°C/min) qui, avec du gaz, évoque un feu."""
+    rules_flood_hum: float = Field(88.0, gt=0, le=100)
+    """RuleBasedPredictor : humidité relative (%) à partir de laquelle une inondation est suspectée."""
 
     # --- Post-traitement ---------------------------------------------------
     smoothing_alpha: float = Field(0.5, gt=0, le=1)
@@ -141,6 +154,18 @@ class Settings(BaseSettings):
     def _blank_is_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
+    @field_validator("esp_alarm_types", mode="before")
+    @classmethod
+    def _csv_list(cls, v: object) -> object:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [p.strip() for p in v.split(",") if p.strip()]
+        unknown = set(v) - set(ALERT_TYPES)
+        if unknown:
+            raise ValueError(f"types inconnus {sorted(unknown)} (attendus : {list(ALERT_TYPES)})")
+        return v
+
     @field_validator("model_paths", "alert_overrides", mode="before")
     @classmethod
     def _json_dict(cls, v: object) -> object:
@@ -155,6 +180,7 @@ class Settings(BaseSettings):
             "k_on": self.alert_k_on,
             "m_off": self.alert_m_off,
         }
+        values.update(DEFAULT_ALERT_OVERRIDES.get(alert_type, {}))
         values.update(self.alert_overrides.get(alert_type, {}))
         return AlertParams.model_validate(values)
 

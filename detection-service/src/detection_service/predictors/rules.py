@@ -23,12 +23,14 @@ class RuleBasedPredictor(Predictor):
     - presence  : max(pir_ratio, cam_ratio)
     - fuite_gaz : sigmoïde centrée sur `gas_delta` (écart à la baseline)
     - feu       : gaz/fumée **et** température qui monte (pente ou delta sur la fenêtre longue)
+    - inondation : humidité proche de la saturation (sigmoïde centrée sur `flood_hum`)
     """
 
     def __init__(self, gas_delta: float = 150.0, temp_slope_c_per_min: float = 0.5,
-                 version: str = "rules-v1") -> None:
+                 flood_hum: float = 88.0, version: str = "rules-v1") -> None:
         self.gas_delta = gas_delta
         self.temp_slope = temp_slope_c_per_min
+        self.flood_hum = flood_hum
         self.version = version
 
     def predict(self, features: Mapping[str, float]) -> dict[str, float]:
@@ -38,11 +40,15 @@ class RuleBasedPredictor(Predictor):
             _sigmoid((_f(features, "temp_slope_long") - self.temp_slope) / (self.temp_slope * 0.3)),
             _sigmoid((_f(features, "temp_delta_long") - 2.0) / 0.5),
         )
+        hum = features.get("hum_last")
+        flood = 0.0 if hum is None or math.isnan(hum) else _sigmoid((hum - self.flood_hum) / 1.5)
         return {
             "feu": min(gas_score, temp_score),
             "fuite_gaz": gas_score,
+            "inondation": flood,
             "presence": min(1.0, presence),
         }
 
     def describe(self) -> dict[str, object]:
-        return {**super().describe(), "gas_delta": self.gas_delta, "temp_slope_c_per_min": self.temp_slope}
+        return {**super().describe(), "gas_delta": self.gas_delta, "temp_slope_c_per_min": self.temp_slope,
+                "flood_hum": self.flood_hum}

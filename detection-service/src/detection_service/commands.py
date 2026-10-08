@@ -67,3 +67,62 @@ class CommandSender:
                                         "state": command.get("state"),
                                         "result": "timeout" if ack is None else ("ok" if ack.ok else ack.error)})
         return ack
+
+
+ALARM_TEXT = {"feu": "INCENDIE DETECTE", "fuite_gaz": "FUITE DE GAZ DETECTEE",
+              "inondation": "INONDATION DETECTEE", "presence": "PRESENCE DETECTEE"}
+"""Texte de l'écran de l'ESP pendant l'alarme (ASCII, 100 caractères au plus)."""
+
+
+class EspAlarm:
+    """Répercute les alertes détectées sur l'alarme de l'ESP (buzzer, LED rouge, écran).
+
+    `set()` est appelé par le moteur (synchrone) ; un worker envoie les commandes dans l'ordre et
+    réessaie toutes les ESP_ALARM_RETRY_S tant que l'ESP n'a pas acquitté l'état voulu.
+    """
+
+    def __init__(self, settings: Settings, commands: CommandSender) -> None:
+        self.settings = settings
+        self.commands = commands
+        self.wanted: dict[str, str] = {}
+        self.applied: dict[str, str] = {}
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def set(self, device_id: str, alert: str) -> None:
+        self.wanted[device_id] = alert
+        self._queue.put_nowait(device_id)
+
+    def _commands_for(self, alert: str) -> list[dict[str, Any]]:
+        if alert == "aucune":
+            return [{"command": "alert", "state": "off"}, {"command": "screen", "state": "auto"}]
+        return [{"command": "alert", "state": "on"},
+                {"command": "screen", "state": "message", "text": ALARM_TEXT.get(alert, alert.upper())[:100]}]
+
+    async def _apply(self, device_id: str, alert: str) -> bool:
+        for command in self._commands_for(alert):
+            try:
+                ack = await self.commands.send(device_id, command)
+            except BrokerUnavailable:
+                return False
+            if ack is None or not ack.ok:
+                return False
+        return True
+
+    async def _retry_later(self, device_id: str) -> None:
+        await asyncio.sleep(self.settings.esp_alarm_retry_s)
+        self._queue.put_nowait(device_id)
+
+    async def run(self) -> None:
+        retries: set[asyncio.Task[None]] = set()
+        while True:
+            device_id = await self._queue.get()
+            alert = self.wanted.get(device_id)
+            if alert is None or self.applied.get(device_id) == alert:
+                continue
+            if await self._apply(device_id, alert):
+                self.applied[device_id] = alert
+                log.info("alarme ESP", extra={"device_id": device_id, "alert": alert})
+            elif self.wanted.get(device_id) == alert:
+                task = asyncio.create_task(self._retry_later(device_id))
+                retries.add(task)
+                task.add_done_callback(retries.discard)

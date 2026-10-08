@@ -17,7 +17,7 @@ from .baseline import GasBaseline
 from .buffers import DeviceBuffers
 from .config import Settings
 from .features import compute_features, nan_to_none
-from .postprocess import AlertResult, PostProcessor, global_status
+from .postprocess import PRIORITY, AlertResult, PostProcessor, global_status
 from .predictors import Predictor
 from .schemas import AlertOut, AlertPayload, CameraEvent, EspAlertMessage, SensorReading, to_utc
 from .storage import BatchWriter, FeatureWindowRow, PredictionRow, RecordingSession
@@ -54,6 +54,9 @@ class DevicePipeline:
     last_payload: AlertPayload | None = None
     last_sent_at: float | None = None
     recording: RecordingSession | None = None
+    alarm: str = "aucune"
+    """Alerte affichée par l'alarme de l'ESP (« aucune » = alarme arrêtée)."""
+    alarm_clear_since: float | None = None
 
     def __post_init__(self) -> None:
         s = self.settings
@@ -123,11 +126,14 @@ class DetectionEngine:
         predictor: Predictor,
         writer: BatchWriter | None = None,
         enqueue_payload: Callable[[AlertPayload], object] | None = None,
+        on_alarm: Callable[[str, str], object] | None = None,
     ) -> None:
         self.settings = settings
         self.predictor = predictor
         self.writer = writer
         self.enqueue_payload = enqueue_payload or (lambda _p: None)
+        self.on_alarm = on_alarm or (lambda _device_id, _alert: None)
+        """Appelé (device_id, alerte) quand l'alarme de l'ESP doit changer ; « aucune » = l'arrêter."""
         self.devices: dict[str, DevicePipeline] = {}
         self.predict_errors = 0
         self.last_tick_at: float | None = None
@@ -212,6 +218,7 @@ class DetectionEngine:
             result = dev.tick(now, self.predictor, self._on_predict_error)
             self._store_window(dev, result)
             self._store_alerts(previous, result)
+            self._update_alarm(dev, result)
             changed = previous is None or previous.key() != result.key()
             heartbeat_due = dev.last_sent_at is None or now - dev.last_sent_at >= self.settings.heartbeat_interval_s
             if changed or heartbeat_due:
@@ -230,6 +237,20 @@ class DetectionEngine:
                                                          "device_state": result.device_state})
                 emitted.append(payload)
         return emitted
+
+    def _update_alarm(self, dev: DevicePipeline, result: TickResult) -> None:
+        """Alarme de l'ESP : alerte active la plus prioritaire parmi ESP_ALARM_TYPES."""
+        active = {a.type for a in result.alerts if a.active}
+        alarm = next((t for t in PRIORITY if t in active and t in self.settings.esp_alarm_types), "aucune")
+        if alarm == "aucune" and dev.alarm != "aucune":
+            if dev.alarm_clear_since is None:
+                dev.alarm_clear_since = result.window_end
+            if result.window_end - dev.alarm_clear_since < self.settings.esp_alarm_off_delay_s:
+                return
+        dev.alarm_clear_since = None
+        if alarm != dev.alarm:
+            dev.alarm = alarm
+            self.on_alarm(dev.device_id, alarm)
 
     def _store_alerts(self, previous: TickResult | None, result: TickResult) -> None:
         new = activated(previous.alerts if previous else [], result.alerts)

@@ -1,5 +1,27 @@
 {
-  "description": "Topic `sentinelx/{device_id}/camera`.",
+  "$defs": {
+    "CameraFace": {
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Personne autorisée reconnue, null si inconnu",
+          "title": "Name"
+        }
+      },
+      "title": "CameraFace",
+      "type": "object"
+    }
+  },
+  "description": "Topic `sentinelx/{device_id}/camera`.\n\nSeul `person` entre dans le modèle ; `identity`, `names` et `faces` (human-detection-ia) sont\nenregistrés comme dernier état de la caméra (detection.camera_state), lu par backend-api.",
   "properties": {
     "ts": {
       "anyOf": [
@@ -18,6 +40,38 @@
       "description": "Personne détectée",
       "title": "Person",
       "type": "boolean"
+    },
+    "identity": {
+      "anyOf": [
+        {
+          "maxLength": 16,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "none | authorized | unknown",
+      "title": "Identity"
+    },
+    "names": {
+      "description": "Personnes autorisées reconnues",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Names",
+      "type": "array"
+    },
+    "faces": {
+      "description": "Visages vus",
+      "items": {
+        "$ref": "#/$defs/CameraFace"
+      },
+      "maxItems": 20,
+      "title": "Faces",
+      "type": "array"
     }
   },
   "required": [

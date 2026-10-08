@@ -6,6 +6,7 @@
           "enum": [
             "feu",
             "fuite_gaz",
+            "inondation",
             "presence"
           ],
           "title": "Type",
@@ -64,10 +65,11 @@
       "type": "string"
     },
     "status": {
-      "description": "Alerte active la plus prioritaire (feu > fuite_gaz > presence > aucune)",
+      "description": "Alerte active la plus prioritaire (feu > fuite_gaz > inondation > presence > aucune)",
       "enum": [
         "feu",
         "fuite_gaz",
+        "inondation",
         "presence",
         "aucune"
       ],

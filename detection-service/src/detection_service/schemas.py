@@ -14,8 +14,8 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
-AlertType = Literal["feu", "fuite_gaz", "presence"]
-AlertStatus = Literal["feu", "fuite_gaz", "presence", "aucune"]
+AlertType = Literal["feu", "fuite_gaz", "inondation", "presence"]
+AlertStatus = Literal["feu", "fuite_gaz", "inondation", "presence", "aucune"]
 DeviceState = Literal["ok", "warming_up", "no_data", "stale"]
 AlertSource = Literal["model", "rule"]
 
@@ -182,7 +182,7 @@ class AlertPayload(BaseModel):
 
     device_id: str
     timestamp: datetime
-    status: AlertStatus = Field(..., description="Alerte active la plus prioritaire (feu > fuite_gaz > presence > aucune)")
+    status: AlertStatus = Field(..., description="Alerte active la plus prioritaire (feu > fuite_gaz > inondation > presence > aucune)")
     device_state: DeviceState = Field(
         ..., description="ok, ou raison de l'absence de prédiction (warming_up, no_data, stale)"
     )
