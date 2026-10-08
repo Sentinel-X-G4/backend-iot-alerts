@@ -20,13 +20,6 @@ class ModelMode(str, Enum):
     MULTICLASS = "multiclass"
 
 
-class PredictorKind(str, Enum):
-    AUTO = "auto"
-    """Modèles Orange s'ils sont trouvés (MODELS_DIR ou chemins explicites), sinon règles."""
-    RULES = "rules"
-    ORANGE = "orange"
-
-
 DEFAULT_ALERT_OVERRIDES: dict[str, dict[str, float]] = {"presence": {"k_on": 8}}
 """Réglages par défaut d'un type, sous ALERT_OVERRIDES. Présence : 8 ticks (≈ 4 s) pour qu'une
 impulsion isolée du PIR (0,6 à 0,9 s mesurés en pièce vide) ne déclenche pas l'alarme."""
@@ -88,7 +81,6 @@ class Settings(BaseSettings):
     baseline_init_ticks: int = Field(10, ge=1)
 
     # --- Modèle ----------------------------------------------------------
-    predictor: PredictorKind = PredictorKind.AUTO
     model_mode: ModelMode = ModelMode.MULTILABEL
     models_dir: Path = Path("/models")
     """Dossier des .pkcls exportés par Orange : <type>.pkcls (multi-label) ou model.pkcls (multi-classe)."""
@@ -97,14 +89,8 @@ class Settings(BaseSettings):
     model_paths: Annotated[dict[str, Path], NoDecode] = Field(default_factory=dict)
     """Mode multi-label : JSON {"presence": "...", ...} ; vide = MODELS_DIR/<type>.pkcls présents."""
     model_version: str | None = None
-    """Libellé envoyé au backend ; vide = « rules-v1 » ou « orange-<empreinte des fichiers> »."""
+    """Libellé envoyé au backend ; vide = « orange-<empreinte des fichiers> »."""
     model_negative_class: str = "aucune"
-    rules_gas_delta: float = Field(150.0, gt=0)
-    """RuleBasedPredictor : écart à la baseline (unités ADC) à partir duquel le gaz est suspect."""
-    rules_temp_slope_c_per_min: float = Field(0.5, gt=0)
-    """RuleBasedPredictor : hausse de température (°C/min) qui, avec du gaz, évoque un feu."""
-    rules_flood_hum: float = Field(88.0, gt=0, le=100)
-    """RuleBasedPredictor : humidité relative (%) à partir de laquelle une inondation est suspectée."""
 
     # --- Post-traitement ---------------------------------------------------
     smoothing_alpha: float = Field(0.5, gt=0, le=1)

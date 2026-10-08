@@ -19,7 +19,7 @@ def run() -> None:
     try:
         service = Service(settings)
     except ModelLoadError as exc:
-        logging.getLogger("detection_service").critical("modèle invalide : %s", exc)
+        logging.getLogger("detection_service").critical("modèle absent ou invalide : %s", exc)
         sys.exit(2)
     asyncio.run(service.run())
 

@@ -22,7 +22,7 @@ dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
      │   engine : un DevicePipeline par appareil             │      BatchWriter
      │   ┌───────────┐   ┌────────────┐   ┌───────────────┐  │  (file bornée, lots,
      │   │ buffers   │──▶│ features   │──▶│ predictor     │  │──▶ reprises) ──▶ PostgreSQL
-     │   │ (tampons  │   │ (fonction  │   │ rules ou      │  │                  schéma « detection »
+     │   │ (tampons  │   │ (fonction  │   │ modèles       │  │                  schéma « detection »
      │   │ circulaires)  │ pure)      │   │ Orange .pkcls │  │
      │   └───────────┘   └─────▲──────┘   └──────┬────────┘  │
      │        baseline gaz ────┘                 ▼           │
@@ -42,7 +42,7 @@ dans PostgreSQL, y compris les sessions étiquetées exportées vers Orange.
 | `buffers.py` | Tampons circulaires horodatés par appareil et par signal. |
 | `features.py` | **Calcul pur des features**, seule source de vérité (temps réel = entraînement). |
 | `baseline.py` | Baseline lente du MQ-2 (médiane initiale puis EMA, gelée pendant les alertes). |
-| `predictors/` | `RuleBasedPredictor`, `OrangePredictor` (.pkcls de `models/`, détectés automatiquement). |
+| `predictors/` | `OrangePredictor` (.pkcls de `models/`, détectés automatiquement). |
 | `commands.py` | Commandes vers l'ESP, dont l'alarme déclenchée par les alertes (`EspAlarm`). |
 | `postprocess.py` | Lissage, hystérésis K/M, filet de sécurité gaz, priorité des statuts. |
 | `engine.py` | Orchestration par appareil, états (`warming_up`, `no_data`, `stale`), payloads. |
@@ -121,7 +121,6 @@ principales :
 | `SHORT_WINDOW_S`, `LONG_WINDOW_S` | `2`, `60` | Fenêtres courte et longue. |
 | `WARMUP_SECONDS` | `120` | Préchauffage sans prédiction. |
 | `BASELINE_TAU_S` | `600` | Constante de temps de la baseline gaz. |
-| `PREDICTOR` | `auto` | `auto` (modèles Orange s'ils sont présents, sinon règles), `orange` ou `rules`. |
 | `MODELS_DIR` | `/models` | Dossier des `.pkcls` exportés par Orange. |
 | `MODEL_MODE` | `multilabel` | `multilabel` (un modèle binaire par alerte) ou `multiclass`. |
 | `MODEL_PATH` / `MODEL_PATHS` | — | Chemins explicites, prioritaires sur `MODELS_DIR`. |
@@ -143,8 +142,8 @@ configurables :
   `POST /api/alerts`) n'est utilisé que si `MQTT_RESULT_TOPIC` est vide.
 - **MQTT** : le format d'entrée est imposé par ce service (`docs/MQTT_CONTRACT.md`). Le
   conteneur qui relaie l'ESP et la caméra s'y conforme.
-- **Modèle** : mode **multi-label** par défaut. Tant qu'aucun `.pkcls` n'est déposé dans
-  `models/`, le `RuleBasedPredictor` est utilisé.
+- **Modèle** : mode **multi-label** par défaut. Au moins un `.pkcls` est obligatoire dans
+  `models/` : sans modèle, le service refuse de démarrer.
 - **Caméra** : publication périodique supposée. Sinon, augmenter `CAMERA_HOLD_S`.
 - **Appareil `no_data` / `stale`** : les alertes ne sont pas recalculées. Le dernier état est
   renvoyé figé, avec `device_state` pour que le backend sache qu'il n'est plus confirmé.
@@ -234,8 +233,8 @@ fait que charger les modèles exportés et les appliquer aux features en temps r
    | `multilabel` (défaut) | `feu.pkcls`, `fuite_gaz.pkcls`, `inondation.pkcls`, `presence.pkcls` (un type sans fichier vaut 0) |
    | `multiclass` | `model.pkcls` |
 
-   Avec `PREDICTOR=auto` (défaut), le service les utilise dès qu'ils sont présents, sinon il
-   reste sur le `RuleBasedPredictor`. Prise en compte : au démarrage, ou sans redémarrer avec
+   Le service s'arrête au démarrage s'il ne trouve aucun modèle. Prise en compte : au
+   démarrage, ou sans redémarrer avec
    `docker compose kill -s HUP detection-service` (depuis main/) ou
    `curl -X POST localhost:8000/admin/reload-model -H "Authorization: Bearer $ADMIN_TOKEN"`.
    `/health` → `model` indique le predictor actif, les fichiers chargés et `version`

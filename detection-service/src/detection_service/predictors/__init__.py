@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..config import ALERT_TYPES, ModelMode, PredictorKind, Settings
+from ..config import ALERT_TYPES, ModelMode, Settings
 from .base import ModelLoadError, Predictor
-from .rules import RuleBasedPredictor
 
-__all__ = ["ModelLoadError", "Predictor", "RuleBasedPredictor", "create_predictor", "find_models"]
-
-log = logging.getLogger(__name__)
+__all__ = ["ModelLoadError", "Predictor", "create_predictor", "find_models"]
 
 MODEL_SUFFIX = ".pkcls"
 MULTICLASS_FILE = "model.pkcls"
@@ -43,26 +39,20 @@ def fingerprint(paths: Iterable[Path]) -> str:
 
 
 def create_predictor(settings: Settings) -> Predictor:
-    """Construit le predictor configuré. Lève ModelLoadError avec un message explicite."""
-    if settings.predictor != PredictorKind.RULES:
-        model_path, model_paths = find_models(settings)
-        if model_path or model_paths:
-            from .orange import OrangePredictor
-
-            predictor = OrangePredictor.from_paths(
-                settings.model_mode.value,
-                str(model_path) if model_path else None,
-                {t: str(p) for t, p in model_paths.items()},
-                "",
-                settings.model_negative_class,
-            )
-            predictor.version = settings.model_version or fingerprint([model_path] if model_path else model_paths.values())
-            return predictor
+    """Charge les modèles Orange configurés. Lève ModelLoadError avec un message explicite."""
+    model_path, model_paths = find_models(settings)
+    if not (model_path or model_paths):
         expected = MULTICLASS_FILE if settings.model_mode == ModelMode.MULTICLASS else \
             ", ".join(f"{t}{MODEL_SUFFIX}" for t in ALERT_TYPES)
-        if settings.predictor == PredictorKind.ORANGE:
-            raise ModelLoadError(f"PREDICTOR=orange : aucun modèle dans {settings.models_dir} (attendu : {expected})")
-        log.warning("aucun modèle Orange, predictor à règles utilisé",
-                    extra={"models_dir": str(settings.models_dir), "expected": expected})
-    return RuleBasedPredictor(settings.rules_gas_delta, settings.rules_temp_slope_c_per_min,
-                              settings.rules_flood_hum, settings.model_version or "rules-v1")
+        raise ModelLoadError(f"aucun modèle dans {settings.models_dir} (attendu : {expected})")
+    from .orange import OrangePredictor
+
+    predictor = OrangePredictor.from_paths(
+        settings.model_mode.value,
+        str(model_path) if model_path else None,
+        {t: str(p) for t, p in model_paths.items()},
+        "",
+        settings.model_negative_class,
+    )
+    predictor.version = settings.model_version or fingerprint([model_path] if model_path else model_paths.values())
+    return predictor

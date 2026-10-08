@@ -29,6 +29,7 @@ import math
 import pickle
 import random
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,7 +42,7 @@ from detection_service.config import ALERT_TYPES, Settings  # noqa: E402
 from detection_service.dataset import NEGATIVE, label_parts  # noqa: E402
 from detection_service.engine import DevicePipeline  # noqa: E402
 from detection_service.features import FEATURE_NAMES  # noqa: E402
-from detection_service.predictors import RuleBasedPredictor  # noqa: E402
+from detection_service.predictors import Predictor  # noqa: E402
 from detection_service.schemas import CameraEvent, SensorMessage, SensorReading  # noqa: E402
 from detection_service.simulation import RoomSimulator, scenario_parts  # noqa: E402
 
@@ -70,6 +71,22 @@ RECOVERY_S = 60.0
 TICK_S = 0.5
 KEEP_EVERY = 4
 """Une fenêtre sur 4 (toutes les 2 s) : les fenêtres voisines sont presque identiques."""
+
+
+class ScenarioPredictor(Predictor):
+    """Probabilité 1 pour les alertes du scénario simulé en cours, 0 sinon.
+
+    Ne sert qu'à geler la baseline gaz pendant une fuite ou un feu, comme le fait le modèle en
+    production : l'étiquette du scénario tient lieu de modèle parfait.
+    """
+
+    version = "scenario"
+
+    def __init__(self) -> None:
+        self.active: set[str] = set()
+
+    def predict(self, features: Mapping[str, float]) -> dict[str, float]:
+        return {t: 1.0 if t in self.active else 0.0 for t in ALERT_TYPES}
 
 
 @dataclass
@@ -148,7 +165,7 @@ def simulate_session(rng: random.Random, kind: str, index: int, cfg: Settings) -
     perturb = random_perturbations(rng, base["hum"], pre + mid + post) if not positive else Perturbations()
     session_id = f"sim-{index:04d}-{kind}"
     dev = DevicePipeline(session_id, cfg)
-    predictor = RuleBasedPredictor()  # pilote seulement le gel de la baseline gaz pendant une alerte
+    predictor = ScenarioPredictor()
 
     t0 = 1_800_000_000.0 + index * 10_000.0
     t_mid, t_post, t_end = t0 + pre, t0 + pre + mid, t0 + pre + mid + post
@@ -179,6 +196,7 @@ def simulate_session(rng: random.Random, kind: str, index: int, cfg: Settings) -
             else:
                 next_cam = math.inf
         else:
+            predictor.active = scenario_parts(scenario)
             result = dev.tick(t, predictor, lambda exc: None)
             next_tick = t + TICK_S
             n_tick += 1
